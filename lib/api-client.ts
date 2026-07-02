@@ -235,6 +235,29 @@ export async function addIncident(input: {
   });
 }
 
+// Edits a bullet's plan — document type, description, ClickUp link and
+// title. Only allowed while the bullet is still 'open'.
+export async function editIncident(
+  incidentId: string,
+  input: {
+    clickupUrl: string;
+    title?: string;
+    documentType?: string;
+    description: string;
+  }
+): Promise<IncidentLink> {
+  return fetchAPI<IncidentLink>(`/incidents/${incidentId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      edit: true,
+      clickup_url: input.clickupUrl,
+      title: input.title,
+      document_type: input.documentType,
+      description: input.description,
+    }),
+  });
+}
+
 // Closes a bullet with its resolution — what was actually implemented to
 // solve the ClickUp issue.
 export async function closeIncident(

@@ -51,13 +51,13 @@ export function IssuesChart({ data }: IssuesChartProps) {
             type="monotone"
             dataKey="radicados"
             stroke="#f59e0b"
-            name="Issues Radicados"
+            name="Issues Abiertos"
           />
           <Line
             type="monotone"
             dataKey="solucionados"
             stroke="#10b981"
-            name="Issues Solucionados"
+            name="Issues Cerrados"
           />
         </LineChart>
       </ResponsiveContainer>

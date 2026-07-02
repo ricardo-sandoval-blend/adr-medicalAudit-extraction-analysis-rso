@@ -56,7 +56,7 @@ export function Changelog() {
         <div>
           <h1 className="text-3xl font-bold">Changelog</h1>
           <p className="text-muted-foreground">
-            Extractor version history and incidents
+            Historial de versiones e incidencias del extractor
           </p>
         </div>
         <CreateVersionModal

@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/db/postgres';
 import { IncidentLink } from '@/lib/types';
 
-// PATCH: either closes a bullet with its resolution — "qué implementaron
-// para solucionar" the ClickUp issue — or, if the body carries
-// status: 'reverted', rolls back a previously closed bullet, recording who
-// reverted it and why. Bullets open with just a plan/description; closing is
-// how the team records what was actually done, later the same day; a
-// rollback records that the implemented change had to be undone.
+// PATCH: closes a bullet with its resolution — "qué implementaron para
+// solucionar" the ClickUp issue —, edits its plan (body carries edit: true),
+// or, if the body carries status: 'reverted', rolls back a previously closed
+// bullet, recording who reverted it and why. Bullets open with just a
+// plan/description; closing is how the team records what was actually done,
+// later the same day; a rollback records that the implemented change had to
+// be undone.
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -16,6 +17,45 @@ export async function PATCH(
     const { id } = await params;
     const body = await request.json();
     const { status } = body;
+
+    if (body.edit) {
+      const { document_type, description, clickup_url, title } = body;
+
+      if (!clickup_url || !description) {
+        return NextResponse.json(
+          { error: 'Missing required fields' },
+          { status: 400 }
+        );
+      }
+
+      const urlMatch = clickup_url.match(/clickup\.com\/t\/([a-z0-9]+)/i);
+      const clickupId = urlMatch ? urlMatch[1] : clickup_url;
+
+      const result = await query<IncidentLink>(
+        `UPDATE incident_links SET
+          document_type = $1, description = $2, clickup_url = $3,
+          clickup_id = $4, title = $5
+        WHERE id = $6 AND status = 'open'
+        RETURNING *`,
+        [
+          document_type || null,
+          description,
+          clickup_url,
+          clickupId,
+          title || clickup_url,
+          id,
+        ]
+      );
+
+      if (result.rows.length === 0) {
+        return NextResponse.json(
+          { error: 'Bullet not found or no longer editable' },
+          { status: 404 }
+        );
+      }
+
+      return NextResponse.json(result.rows[0]);
+    }
 
     if (status === 'reverted') {
       const { revert_reason, reverted_by } = body;

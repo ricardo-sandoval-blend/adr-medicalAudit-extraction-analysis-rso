@@ -35,6 +35,8 @@ function extractClickupTaskId(url: string): string | null {
   return match ? match[1] : null;
 }
 
+const CLICKUP_BASE_URL = 'https://app.clickup.com/t/';
+
 export function CreateVersionModal({
   onVersionCreated,
   hasOpenVersion = false,
@@ -51,7 +53,7 @@ export function CreateVersionModal({
   const [bullets, setBullets] = useState<VersionBulletInput[]>([]);
   const [currentDocType, setCurrentDocType] = useState<string>(DOCUMENT_TYPES[0]);
   const [currentDescription, setCurrentDescription] = useState('');
-  const [currentClickupUrl, setCurrentClickupUrl] = useState('');
+  const [currentClickupUrl, setCurrentClickupUrl] = useState(CLICKUP_BASE_URL);
   const [currentTitle, setCurrentTitle] = useState('');
 
   const [loading, setLoading] = useState(false);
@@ -109,7 +111,13 @@ export function CreateVersionModal({
   };
 
   const handleAddBullet = () => {
-    if (!currentDocType || !currentDescription.trim() || !currentClickupUrl.trim()) {
+    const clickupUrl = currentClickupUrl.trim();
+    if (
+      !currentDocType ||
+      !currentDescription.trim() ||
+      !clickupUrl ||
+      clickupUrl === CLICKUP_BASE_URL
+    ) {
       return;
     }
 
@@ -118,12 +126,12 @@ export function CreateVersionModal({
       {
         document_type: currentDocType,
         description: currentDescription.trim(),
-        clickup_url: currentClickupUrl.trim(),
+        clickup_url: clickupUrl,
         title: currentTitle.trim() || undefined,
       },
     ]);
     setCurrentDescription('');
-    setCurrentClickupUrl('');
+    setCurrentClickupUrl(CLICKUP_BASE_URL);
     setCurrentTitle('');
   };
 
@@ -153,7 +161,7 @@ export function CreateVersionModal({
       setPatch('0');
       setBullets([]);
       setCurrentDescription('');
-      setCurrentClickupUrl('');
+      setCurrentClickupUrl(CLICKUP_BASE_URL);
       setCurrentTitle('');
       setOpen(false);
       onVersionCreated?.();
@@ -316,7 +324,7 @@ export function CreateVersionModal({
                 <div className="relative">
                   <ClickUpIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4" />
                   <Input
-                    placeholder="https://app.clickup.com/t/abc123"
+                    placeholder="Agrega la URL de ClickUp"
                     value={currentClickupUrl}
                     onChange={(e) => setCurrentClickupUrl(e.target.value)}
                     className="text-sm pl-8"
@@ -341,7 +349,8 @@ export function CreateVersionModal({
                 disabled={
                   !currentDocType ||
                   !currentDescription.trim() ||
-                  !currentClickupUrl.trim()
+                  !currentClickupUrl.trim() ||
+                  currentClickupUrl.trim() === CLICKUP_BASE_URL
                 }
                 className="w-full"
               >

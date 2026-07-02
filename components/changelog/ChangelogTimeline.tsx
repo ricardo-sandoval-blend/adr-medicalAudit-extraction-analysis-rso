@@ -14,6 +14,7 @@ import {
   User,
   CircleDot,
   RotateCcw,
+  Pencil,
 } from 'lucide-react';
 import { Execution, IncidentLink } from '@/lib/types';
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPES } from '@/lib/config';
@@ -25,6 +26,7 @@ import {
   addIncident,
   removeIncident,
   closeIncident,
+  editIncident,
   rollbackIncident,
   closeVersion,
 } from '@/lib/api-client';
@@ -56,6 +58,8 @@ function extractClickupTaskId(url: string): string | null {
   const match = url.match(/clickup\.com\/t\/([a-z0-9]+)/i);
   return match ? match[1] : null;
 }
+
+const CLICKUP_BASE_URL = 'https://app.clickup.com/t/';
 
 function executionStatusVariant(status: Execution['status']) {
   if (status === 'success') return 'default' as const;
@@ -105,12 +109,39 @@ function BulletRow({
   const [resolution, setResolution] = useState('');
   const [showRollbackForm, setShowRollbackForm] = useState(false);
   const [rollbackReason, setRollbackReason] = useState('');
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editDocType, setEditDocType] = useState(bullet.document_type || DOCUMENT_TYPES[0]);
+  const [editDescription, setEditDescription] = useState(bullet.description || '');
+  const [editClickupUrl, setEditClickupUrl] = useState(bullet.clickup_url);
+  const [editTitle, setEditTitle] = useState(bullet.title || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isBulletOpen = bullet.status === 'open';
   const isResolved = bullet.status === 'closed';
   const isReverted = bullet.status === 'reverted';
+
+  const handleEditBullet = async () => {
+    if (!editClickupUrl.trim() || !editDescription.trim()) return;
+    try {
+      setSaving(true);
+      setError(null);
+      await editIncident(bullet.id, {
+        clickupUrl: editClickupUrl.trim(),
+        title: editTitle.trim() || undefined,
+        documentType: editDocType,
+        description: editDescription.trim(),
+      });
+      setShowEditForm(false);
+      onChanged();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to edit bullet'
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleCloseBullet = async () => {
     if (!resolution.trim()) return;
@@ -236,10 +267,25 @@ function BulletRow({
           )}
           {isVersionOpen && isBulletOpen && (
             <button
-              onClick={() => setShowCloseForm((v) => !v)}
+              onClick={() => {
+                setShowEditForm(false);
+                setShowCloseForm((v) => !v);
+              }}
               className="text-blue-600 hover:underline dark:text-blue-400"
             >
               Cerrar
+            </button>
+          )}
+          {isVersionOpen && isBulletOpen && (
+            <button
+              onClick={() => {
+                setShowCloseForm(false);
+                setShowEditForm((v) => !v);
+              }}
+              className="flex items-center gap-1 text-slate-500 hover:text-slate-900 dark:hover:text-white"
+            >
+              <Pencil className="h-3 w-3" />
+              Editar
             </button>
           )}
           {isVersionOpen && isResolved && (
@@ -260,6 +306,59 @@ function BulletRow({
           )}
         </div>
       </div>
+
+      {showEditForm && (
+        <div className="mt-3 space-y-2 rounded bg-slate-50 p-2 dark:bg-slate-900">
+          {error && (
+            <div className="rounded bg-red-100 p-2 text-xs text-red-800 dark:bg-red-900 dark:text-red-200">
+              {error}
+            </div>
+          )}
+          <select
+            value={editDocType}
+            onChange={(e) => setEditDocType(e.target.value)}
+            className="w-full rounded border border-input bg-background px-2 py-2 text-sm"
+          >
+            {DOCUMENT_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {type} - {DOCUMENT_TYPE_LABELS[type]}
+              </option>
+            ))}
+          </select>
+          <textarea
+            placeholder="¿En qué vas a trabajar?"
+            value={editDescription}
+            onChange={(e) => setEditDescription(e.target.value)}
+            className="h-16 w-full rounded border border-input bg-background px-2 py-2 text-sm"
+          />
+          <Input
+            placeholder="https://app.clickup.com/t/abc123"
+            value={editClickupUrl}
+            onChange={(e) => setEditClickupUrl(e.target.value)}
+          />
+          <Input
+            placeholder="Título del issue (opcional)"
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={handleEditBullet}
+              disabled={saving || !editClickupUrl.trim() || !editDescription.trim()}
+            >
+              {saving ? 'Guardando...' : 'Guardar cambios'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowEditForm(false)}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      )}
 
       {showCloseForm && (
         <div className="mt-3 space-y-2 rounded bg-slate-50 p-2 dark:bg-slate-900">
@@ -340,7 +439,7 @@ function VersionCardEntry({
 }) {
   const { user } = useKeycloak();
   const [showAddIssue, setShowAddIssue] = useState(false);
-  const [clickupUrl, setClickupUrl] = useState('');
+  const [clickupUrl, setClickupUrl] = useState(CLICKUP_BASE_URL);
   const [title, setTitle] = useState('');
   const [documentType, setDocumentType] = useState<string>(DOCUMENT_TYPES[0]);
   const [description, setDescription] = useState('');
@@ -352,21 +451,28 @@ function VersionCardEntry({
   const groupedBullets = groupByDocumentType(entry.incidents);
 
   const handleAddIssue = async () => {
-    if (!clickupUrl.trim() || !description.trim()) return;
+    const trimmedClickupUrl = clickupUrl.trim();
+    if (
+      !trimmedClickupUrl ||
+      trimmedClickupUrl === CLICKUP_BASE_URL ||
+      !description.trim()
+    ) {
+      return;
+    }
     try {
       setSaving(true);
       setFormError(null);
 
       await addIncident({
         versionId: entry.id,
-        clickupUrl: clickupUrl.trim(),
-        title: title.trim() || clickupUrl.trim(),
+        clickupUrl: trimmedClickupUrl,
+        title: title.trim() || trimmedClickupUrl,
         documentType,
         description: description.trim(),
         createdBy: user?.email || user?.name,
       });
 
-      setClickupUrl('');
+      setClickupUrl(CLICKUP_BASE_URL);
       setTitle('');
       setDescription('');
       setShowAddIssue(false);
@@ -542,7 +648,7 @@ function VersionCardEntry({
                 className="h-16 w-full rounded border border-input bg-background px-2 py-2 text-sm"
               />
               <Input
-                placeholder="https://app.clickup.com/t/abc123"
+                placeholder="Agrega la URL de ClickUp"
                 value={clickupUrl}
                 onChange={(e) => setClickupUrl(e.target.value)}
               />
@@ -555,7 +661,12 @@ function VersionCardEntry({
                 <Button
                   size="sm"
                   onClick={handleAddIssue}
-                  disabled={saving || !clickupUrl.trim() || !description.trim()}
+                  disabled={
+                    saving ||
+                    !clickupUrl.trim() ||
+                    clickupUrl.trim() === CLICKUP_BASE_URL ||
+                    !description.trim()
+                  }
                 >
                   {saving ? 'Guardando...' : 'Guardar'}
                 </Button>

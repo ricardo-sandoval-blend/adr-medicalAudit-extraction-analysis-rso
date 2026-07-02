@@ -30,19 +30,19 @@ export function Dashboard() {
       <div>
         <h1 className="text-3xl font-bold">Dashboard</h1>
         <p className="text-muted-foreground">
-          Rendimiento operativo: issues radicados y solucionados, ejecuciones realizadas
+          Rendimiento operativo: issues abiertos y cerrados, ejecuciones realizadas
         </p>
       </div>
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <StatsCard
-          title="Issues Radicados"
+          title="Issues Abiertos"
           value={stats?.issues.total ?? 0}
           icon={<ClipboardList className="h-5 w-5" />}
         />
         <StatsCard
-          title="Issues Solucionados"
+          title="Issues Cerrados"
           value={stats?.issues.resolved ?? 0}
           icon={<CheckCircle2 className="h-5 w-5" />}
         />
@@ -65,14 +65,16 @@ export function Dashboard() {
 
       {/* ClickUp issues per day */}
       <div className="space-y-4">
-        <h2 className="text-xl font-semibold">Issues (ClickUp)</h2>
+        <h2 className="text-xl font-semibold">
+          Issues Abiertos vs. Issues Cerrados
+        </h2>
         <IssuesChart data={timeseries?.issues || []} />
       </div>
 
       {/* Recent Executions Table */}
       <div className="space-y-4">
         <h2 className="text-xl font-semibold">
-          Recent Executions
+          Ejecuciones Recientes
         </h2>
         {loading ? (
           <div className="flex h-40 items-center justify-center text-muted-foreground">

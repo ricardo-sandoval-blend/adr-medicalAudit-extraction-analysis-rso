@@ -69,7 +69,7 @@ export function ExecutionEditor({
           with an unprefixed `max-w-*` loses that cascade fight at desktop
           widths (twMerge doesn't treat different breakpoint variants as
           conflicting), so the override must match the `sm:` prefix. */}
-      <DialogContent className="flex max-h-[85vh] w-full flex-col overflow-y-auto sm:max-w-4xl">
+      <DialogContent className="flex max-h-[85vh] w-full flex-col overflow-y-auto sm:max-w-[39.2rem]">
         <DialogHeader>
           <DialogTitle>
             {execution ? 'Editar ejecución' : 'Nueva ejecución'}

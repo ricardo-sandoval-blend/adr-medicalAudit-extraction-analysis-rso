@@ -38,7 +38,7 @@ export function RecentExecutions({
   };
 
   const formatDuration = (start: string, end?: string) => {
-    if (!end) return 'Running...';
+    if (!end) return 'En curso...';
     const seconds = differenceInSeconds(
       new Date(end),
       new Date(start)
@@ -54,11 +54,11 @@ export function RecentExecutions({
         <TableHeader>
           <TableRow>
             <TableHead>Dataset</TableHead>
-            <TableHead>Documents</TableHead>
-            <TableHead>Success Rate</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Duration</TableHead>
-            <TableHead>Date</TableHead>
+            <TableHead>Documentos</TableHead>
+            <TableHead>Tasa de Éxito</TableHead>
+            <TableHead>Estado</TableHead>
+            <TableHead>Duración</TableHead>
+            <TableHead>Fecha</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
