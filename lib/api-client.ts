@@ -1,5 +1,6 @@
 import {
   Dataset,
+  DatasetRadicado,
   Execution,
   ExecuteRequest,
   ExecuteResponse,
@@ -10,6 +11,11 @@ import {
   IncidentLink,
   OperationalStats,
   OperationalTimeseries,
+  ExecutionFieldsResponse,
+  GroundTruthEntry,
+  GroundTruthRadicado,
+  GroundTruthScoreResponse,
+  GroundTruthSet,
 } from './types';
 
 const API_BASE = '/api';
@@ -45,6 +51,22 @@ export async function getDataset(datasetId: string): Promise<Dataset> {
   return fetchAPI<Dataset>(`/datasets/${datasetId}`);
 }
 
+// Lists the radicados (folders) found inside a dataset, each with its PDF
+// documents. Used by the execution editor to search radicados and pick
+// which documents to run for each one.
+export async function getDatasetRadicados(
+  datasetId: string,
+  search?: string,
+  limit: number = 100
+): Promise<DatasetRadicado[]> {
+  const params = new URLSearchParams();
+  if (search) params.append('search', search);
+  params.append('limit', limit.toString());
+  return fetchAPI<DatasetRadicado[]>(
+    `/datasets/${datasetId}/radicados?${params}`
+  );
+}
+
 // Executions
 export async function getExecutions(
   datasetId?: string,
@@ -61,18 +83,16 @@ export async function getExecution(executionId: string): Promise<Execution> {
   return fetchAPI<Execution>(`/executions/${executionId}`);
 }
 
-// Finds the 'draft' execution accumulated during the day for a given open
-// version (radicados added from the Executor), or null if none exists yet.
-export async function getDraftExecution(
-  versionId: string
-): Promise<Execution | null> {
-  const params = new URLSearchParams({
-    versionId,
-    status: 'draft',
-    limit: '1',
-  });
-  const executions = await fetchAPI<Execution[]>(`/executions?${params}`);
-  return executions[0] || null;
+// Lists executions currently in planning ('draft' status) — the rows shown
+// in the Executor's planning table. Several drafts can coexist, each
+// tracking its own dataset, target version, and radicados. Pass versionId
+// to scope to a single version; omit it to list drafts across all versions.
+export async function getDraftExecutions(
+  versionId?: string
+): Promise<Execution[]> {
+  const params = new URLSearchParams({ status: 'draft', limit: '100' });
+  if (versionId) params.append('versionId', versionId);
+  return fetchAPI<Execution[]>(`/executions?${params}`);
 }
 
 export async function createExecution(
@@ -91,6 +111,15 @@ export async function updateExecution(
   return fetchAPI<Execution>(`/executions/${executionId}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
+  });
+}
+
+// Removes a planned ('draft') execution from the planning table.
+export async function deleteExecution(
+  executionId: string
+): Promise<{ success: boolean }> {
+  return fetchAPI<{ success: boolean }>(`/executions/${executionId}`, {
+    method: 'DELETE',
   });
 }
 
@@ -221,6 +250,23 @@ export async function closeIncident(
   });
 }
 
+// Rolls back a previously closed bullet — the implemented change had to be
+// undone. Only allowed while the bullet is 'closed'; records who reverted it
+// and why.
+export async function rollbackIncident(
+  incidentId: string,
+  input: { reason: string; revertedBy?: string }
+): Promise<IncidentLink> {
+  return fetchAPI<IncidentLink>(`/incidents/${incidentId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      status: 'reverted',
+      revert_reason: input.reason,
+      reverted_by: input.revertedBy,
+    }),
+  });
+}
+
 export async function removeIncident(
   incidentId: string
 ): Promise<{ success: boolean }> {
@@ -228,6 +274,95 @@ export async function removeIncident(
     `/incidents/${incidentId}`,
     { method: 'DELETE' }
   );
+}
+
+// Ground truth
+// Lists every radicado with at least one ground-truth field defined, for
+// the management view.
+export async function getGroundTruthSets(): Promise<GroundTruthSet[]> {
+  return fetchAPI<GroundTruthSet[]>('/ground-truth');
+}
+
+// Reads the ground truth defined so far for one radicado (every document
+// type that has fields fixed).
+export async function getGroundTruth(
+  datasetId: string,
+  radicado: string
+): Promise<GroundTruthRadicado> {
+  const params = new URLSearchParams({ dataset_id: datasetId, radicado });
+  return fetchAPI<GroundTruthRadicado>(`/ground-truth?${params}`);
+}
+
+// Fixes (creates or overwrites) the correct value for one field — the
+// "desempate" recorded while reviewing a diff between two executions.
+export async function upsertGroundTruthField(input: {
+  datasetId: string;
+  radicado: string;
+  documentType: string;
+  fieldPath: string;
+  valor: unknown;
+  estado?: string | null;
+  observacion?: string | null;
+  updatedBy?: string;
+}): Promise<GroundTruthEntry> {
+  return fetchAPI<GroundTruthEntry>('/ground-truth/field', {
+    method: 'POST',
+    body: JSON.stringify({
+      dataset_id: input.datasetId,
+      radicado: input.radicado,
+      document_type: input.documentType,
+      field_path: input.fieldPath,
+      valor: input.valor,
+      estado: input.estado,
+      observacion: input.observacion,
+      updated_by: input.updatedBy,
+    }),
+  });
+}
+
+export async function deleteGroundTruthField(input: {
+  datasetId: string;
+  radicado: string;
+  documentType: string;
+  fieldPath: string;
+}): Promise<{ success: boolean }> {
+  const params = new URLSearchParams({
+    dataset_id: input.datasetId,
+    radicado: input.radicado,
+    document_type: input.documentType,
+    field_path: input.fieldPath,
+  });
+  return fetchAPI<{ success: boolean }>(`/ground-truth/field?${params}`, {
+    method: 'DELETE',
+  });
+}
+
+// The flattened extracted fields of one document, as produced by a given
+// execution (reads the on-disk extraction output — see lib/extraction.ts).
+export async function getExecutionFields(
+  executionId: string,
+  radicado: string,
+  documentType: string
+): Promise<ExecutionFieldsResponse> {
+  const params = new URLSearchParams({ radicado, type: documentType });
+  return fetchAPI<ExecutionFieldsResponse>(
+    `/executions/${executionId}/fields?${params}`
+  );
+}
+
+// Measures one execution's extracted values against the ground truth fixed
+// for a radicado — the "desempate" scoring.
+export async function scoreExecutionAgainstGroundTruth(
+  datasetId: string,
+  radicado: string,
+  executionId: string
+): Promise<GroundTruthScoreResponse> {
+  const params = new URLSearchParams({
+    dataset_id: datasetId,
+    radicado,
+    execution_id: executionId,
+  });
+  return fetchAPI<GroundTruthScoreResponse>(`/ground-truth/score?${params}`);
 }
 
 // Polling helper

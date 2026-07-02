@@ -41,7 +41,7 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { dataset_id, criteria, total_documents, pdf_count } = body;
+    const { dataset_id, version_id, criteria, total_documents, pdf_count } = body;
 
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -49,6 +49,10 @@ export async function PATCH(
     if (dataset_id !== undefined) {
       values.push(dataset_id);
       sets.push(`dataset_id = $${values.length}`);
+    }
+    if (version_id !== undefined) {
+      values.push(version_id);
+      sets.push(`version_id = $${values.length}`);
     }
     if (criteria !== undefined) {
       values.push(JSON.stringify(criteria));
@@ -90,6 +94,38 @@ export async function PATCH(
     console.error('Error updating execution:', error);
     return NextResponse.json(
       { error: 'Failed to update execution' },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE: remove a planned execution from the planning table. Only allowed
+// while it's still a 'draft' — once it starts running it's part of the
+// execution history and shouldn't be deleted from here.
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+
+    const result = await query(
+      `DELETE FROM executions WHERE id = $1 AND status = 'draft' RETURNING id`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return NextResponse.json(
+        { error: 'Draft execution not found (it may have already started)' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting execution:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete execution' },
       { status: 500 }
     );
   }

@@ -1,21 +1,43 @@
-// Radicado structure
-export interface Radicado {
-  numero: string; // e.g., '000930'
-  nit: string; // e.g., '800149384'
-  prestadora: string; // Healthcare provider name
-  full_id?: string; // e.g., '000930_800149384_70563119'
+// A document found inside a radicado folder in a dataset (PDF only). `type`
+// is the 3-letter document code (matches DOCUMENT_TYPES in lib/config.ts),
+// taken from the filename prefix, e.g. 'ADM_800149384_700678828.pdf' -> 'ADM'.
+export interface RadicadoDocument {
+  type: string;
+  filename: string;
+  path: string;
+}
+
+// A radicado as found on disk inside a dataset: one folder per radicado,
+// named '{numero}_{nit}_{suffix}', containing its documents.
+export interface DatasetRadicado {
+  full_id: string; // dataset folder name, e.g. '000930_800149384_70563119'
+  numero: string;
+  nit: string;
+  suffix: string;
+  documents: RadicadoDocument[]; // PDFs only, filtered to known DOCUMENT_TYPES
+}
+
+// A radicado chosen for an execution, with which of its documents to run
+// (by 3-letter type code, e.g. ['ADM', 'FAC']).
+export interface RadicadoSelection {
+  full_id: string;
+  numero: string;
+  nit: string;
+  suffix?: string;
+  documents: string[];
 }
 
 // Execution criteria
 export interface ExecutionCriteria {
-  ips: string[];
-  mandatory_radicados: Radicado[];
+  ips?: string[];
+  radicados: RadicadoSelection[];
 }
 
 // Execution record
-// status lifecycle: 'draft' (accumulating mandatory radicados, freely
-// editable from the Executor) -> 'running' (started via "Iniciar") ->
-// 'success' | 'failed'.
+// status lifecycle: 'draft' (a planned execution being configured in the
+// Executor's planning table — radicados/documents freely editable) ->
+// 'running' (started via "Iniciar") -> 'success' | 'failed'. Many drafts can
+// exist at once per version, each tracking its own dataset + radicados.
 export interface Execution {
   id: string;
   dataset_id: string;
@@ -93,7 +115,9 @@ export interface FieldChange {
 // Incident link: a "bullet" in the changelog — a ClickUp issue with its own
 // lifecycle: opened with just document type + a plan + the issue link, then
 // closed later (same day) with the resolution — what was actually
-// implemented to solve it. Bullets are grouped by document_type when
+// implemented to solve it. A closed bullet can later be rolled back
+// (status='reverted') if the implemented change had to be undone, recording
+// who reverted it and why. Bullets are grouped by document_type when
 // displayed.
 export interface IncidentLink {
   id: string;
@@ -103,12 +127,15 @@ export interface IncidentLink {
   title: string;
   document_type?: string;
   description?: string; // the plan: what will be worked on
-  status: 'open' | 'closed';
+  status: 'open' | 'closed' | 'reverted';
   resolution?: string; // what was implemented to solve it, set on close
   created_at: string;
   created_by?: string; // email of who registered this bullet
   closed_at?: string;
   closed_by?: string; // email of who resolved this bullet
+  reverted_at?: string;
+  reverted_by?: string; // email of who rolled this bullet back
+  revert_reason?: string; // why the implemented change was rolled back
 }
 
 // Dataset info
@@ -118,6 +145,7 @@ export interface Dataset {
   path: string;
   pdf_count: number;
   total_size_mb: number;
+  radicado_count?: number;
   last_execution?: Execution;
 }
 
@@ -161,6 +189,7 @@ export interface DraftExecutionInput {
   total_documents?: number;
   pdf_count?: number;
   criteria?: ExecutionCriteria;
+  created_by?: string;
 }
 
 export interface ExecuteResponse {
@@ -219,4 +248,94 @@ export interface ChangelogEntry {
     error_count: number;
   };
   incidents: IncidentLink[];
+}
+
+// ---------------------------------------------------------------------------
+// Ground truth
+// ---------------------------------------------------------------------------
+
+// A single extracted leaf value, as read from a document's extraction JSON
+// (executions/<date>/<numero_nit>/<seq>_<TYPE>_<nit>_<suffix>.json) or from a
+// ground-truth field file. Every leaf field in the extraction JSON has this
+// shape.
+export interface ExtractionLeaf {
+  valor: unknown;
+  estado?: string | null;
+  observacion?: string | null;
+}
+
+// A document's extraction, flattened to `field_path -> leaf` (dot-separated
+// path, e.g. 'paz_y_salvo_transporte.entidad_prestadora.nit'). Produced by
+// lib/extraction.ts#flattenExtraction; ground-truth field files use the same
+// path space so the two can be compared key by key.
+export type ExtractionFieldMap = Record<string, ExtractionLeaf>;
+
+// Response of GET /api/executions/[id]/fields — the flattened fields of one
+// document of one radicado, as produced by a given execution. `found` is
+// false when no matching file exists on disk for that execution/radicado/
+// document (today's executions are mocked and don't write real extraction
+// output — see lib/extraction.ts).
+export interface ExecutionFieldsResponse {
+  execution_id: string;
+  radicado: string;
+  document_type: string;
+  found: boolean;
+  fields: ExtractionFieldMap;
+}
+
+// A ground truth entry: the correct value for one field, fixed by a
+// reviewer while comparing two executions ("desempate"). Stored as JSON on
+// disk (not in the DB) under
+// ground-truth/<dataset_id>/<radicado_full_id>/<document_type>.json, keyed
+// by field_path.
+export interface GroundTruthEntry {
+  valor: unknown;
+  estado?: string | null;
+  observacion?: string | null;
+  updated_by?: string;
+  updated_at: string;
+}
+
+// Contents of one ground-truth document file: field_path -> entry.
+export type GroundTruthDocument = Record<string, GroundTruthEntry>;
+
+// Response of GET /api/ground-truth?dataset_id=&radicado= — every
+// ground-truth document defined so far for a radicado, keyed by document
+// type.
+export interface GroundTruthRadicado {
+  dataset_id: string;
+  radicado_full_id: string;
+  documents: Record<string, GroundTruthDocument>;
+}
+
+// One row of GET /api/ground-truth (no filters) — a summary of each
+// radicado that has at least one ground-truth field defined.
+export interface GroundTruthSet {
+  dataset_id: string;
+  radicado_full_id: string;
+  document_types: string[];
+  field_count: number;
+}
+
+// One field's comparison in GET /api/ground-truth/score.
+export interface GroundTruthScoreField {
+  document_type: string;
+  field_path: string;
+  expected: { valor: unknown; estado?: string | null };
+  actual: { valor: unknown; estado?: string | null } | null;
+  match: boolean;
+}
+
+// Response of GET /api/ground-truth/score — how one execution's extracted
+// values measure up against the ground truth fixed for a radicado.
+export interface GroundTruthScoreResponse {
+  execution_id: string;
+  dataset_id: string;
+  radicado_full_id: string;
+  fields: GroundTruthScoreField[];
+  summary: {
+    total: number;
+    matched: number;
+    accuracy: number; // percentage, 0-100
+  };
 }

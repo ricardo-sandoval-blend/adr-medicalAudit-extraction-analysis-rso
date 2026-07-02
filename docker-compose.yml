@@ -9,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./volume/db:/var/lib/postgresql/data
       - ./prisma/init.sql:/docker-entrypoint-initdb.d/01-init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U adr_user -d adr_extraction"]
@@ -43,28 +43,31 @@ services:
       DB_NAME: adr_extraction
       DATASETS_PATH: /app/datasets
       CHANGELOG_PATH: /app/data/changelog
+      EXECUTIONS_PATH: /app/executions
+      GROUND_TRUTH_PATH: /app/ground-truth
     ports:
       - "3000:3000"
     volumes:
-      - ./datasets:/app/datasets:ro
-      - ./data/changelog:/app/data/changelog
-      - ./executions:/app/executions
+      - ./volume/datasets:/app/datasets:ro
+      - ./volume/changelog:/app/data/changelog
+      - ./volume/executions:/app/executions
+      - ./volume/ground-truth:/app/ground-truth
     networks:
       - adr-network
-
-volumes:
-  postgres_data:
-    driver: local
 
 networks:
   adr-network:
     driver: bridge
 
 # Notes:
-# - Data volumes are mounted from local directories:
-#   - ./datasets: Contains PDFs and request.json for each dataset (read-only)
-#   - ./data/changelog: Contains markdown files for changelog versions
-#   - ./executions: Execution history written by the app
+# - All persistent data lives under a single host folder, ./volume, so it's
+#   easy to inspect/back up as one unit (Postgres's data directory is not a
+#   named Docker volume — it's just another bind-mounted subfolder):
+#   - ./volume/db: Postgres data directory
+#   - ./volume/datasets: PDFs for each dataset, one subfolder per radicado (read-only)
+#   - ./volume/executions: Execution history written by the app
+#   - ./volume/changelog: Markdown files for changelog versions
+#   - ./volume/ground-truth: Reviewer-fixed field values, one JSON file per document
 #
 # - The `nextjs` service applies the Prisma schema (`prisma db push`) automatically
 #   on container startup via docker-entrypoint.sh, then starts the app.

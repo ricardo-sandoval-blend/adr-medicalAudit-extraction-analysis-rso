@@ -83,9 +83,11 @@ CREATE INDEX idx_structure_versions_version ON structure_versions(version);
 -- during the day. Has its own lifecycle independent of the version draft's:
 -- opened with just document type + a plan ("voy a trabajar en esto") + the
 -- issue link, then closed later (same day, once resolved) with the
--- resolution — what was actually implemented to solve it. version_id points
--- at the first-class `versions` table (a version draft). Bullets are grouped
--- by document_type when displayed.
+-- resolution — what was actually implemented to solve it. A closed bullet can
+-- later be rolled back (status='reverted') if the implemented change had to
+-- be undone, recording why. version_id points at the first-class `versions`
+-- table (a version draft). Bullets are grouped by document_type when
+-- displayed.
 CREATE TABLE incident_links (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   version_id UUID NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
@@ -94,12 +96,15 @@ CREATE TABLE incident_links (
   title VARCHAR(1024),
   document_type VARCHAR(50),
   description TEXT, -- the plan: what will be worked on
-  status VARCHAR(20) DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+  status VARCHAR(20) DEFAULT 'open' CHECK (status IN ('open', 'closed', 'reverted')),
   resolution TEXT, -- what was implemented to solve it, set on close
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   created_by VARCHAR(255), -- email of who registered this bullet
   closed_at TIMESTAMP,
   closed_by VARCHAR(255), -- email of who resolved this bullet
+  reverted_at TIMESTAMP,
+  reverted_by VARCHAR(255), -- email of who rolled this bullet back
+  revert_reason TEXT, -- why the implemented change was rolled back
   CONSTRAINT incident_unique UNIQUE (version_id, clickup_id)
 );
 

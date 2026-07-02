@@ -1,108 +1,150 @@
 'use client';
 
 import { useState } from 'react';
-import { useExecutor } from '@/hooks/useExecutor';
-import { useCurrentVersion } from '@/hooks/useCurrentVersion';
+import Link from 'next/link';
+import { useVersions } from '@/hooks/useVersions';
 import { useDatasets } from '@/hooks/useDatasets';
-import { DatasetSelector } from './DatasetSelector';
-import { SampleCalculator } from './SampleCalculator';
-import { MandatoryRadicados } from './MandatoryRadicados';
-import { ExecutionReview } from './ExecutionReview';
+import { useDraftExecutions } from '@/hooks/useDraftExecutions';
+import { ExecutionEditor } from './ExecutionEditor';
 import { ExecutionStatus } from './ExecutionStatus';
-import { PreviousExecutionSelector } from './PreviousExecutionSelector';
-import { executeExtraction } from '@/lib/api-client';
+import {
+  executeExtraction,
+  deleteExecution,
+  getDatasetRadicados,
+} from '@/lib/api-client';
 import { Execution } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Loader2, Target } from 'lucide-react';
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+} from '@/components/ui/table';
+import { format } from 'date-fns';
+import { GitCompare, Loader2, Pencil, Trash2, Play, Plus } from 'lucide-react';
 
 export function Executor() {
-  const { version, loading: versionLoading } = useCurrentVersion();
+  const { versions, loading: versionsLoading } = useVersions();
   const { datasets } = useDatasets();
-  const executor = useExecutor(version?.id, datasets);
-  const [executing, setExecuting] = useState(false);
-  const [executionId, setExecutionId] = useState<string | null>(null);
+  const { executions, loading: executionsLoading, refetch } = useDraftExecutions();
+
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editing, setEditing] = useState<Execution | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [runningExecutionId, setRunningExecutionId] = useState<string | null>(null);
   const [finished, setFinished] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleExecute = async () => {
-    if (!version) {
-      setError('No hay una versión abierta');
+  const versionsById = new Map(versions.map((v) => [v.id, v]));
+
+  const openNew = () => {
+    setEditing(null);
+    setEditorOpen(true);
+  };
+
+  const openEdit = (execution: Execution) => {
+    setEditing(execution);
+    setEditorOpen(true);
+  };
+
+  const handleDelete = async (execution: Execution) => {
+    if (!confirm(`¿Eliminar la ejecución en planeación de "${execution.dataset_id}"?`)) {
       return;
     }
-
-    if (!executor.selectedDataset) {
-      setError('Select a dataset');
-      return;
-    }
-
-    if (executor.sampleSize <= 0) {
-      setError('Sample size must be > 0');
-      return;
-    }
-
+    setDeletingId(execution.id);
+    setError(null);
     try {
-      setExecuting(true);
-      setError(null);
-
-      const response = await executeExtraction({
-        execution_id: executor.draftExecutionId,
-        dataset_id: executor.selectedDataset.id,
-        pdf_paths: executor.selectedPDFs,
-        criteria: executor.getCriteria(),
-        sample_size: executor.sampleSize,
-        version_id: version.id,
-      });
-
-      setFinished(false);
-      setExecutionId(response.execution_id);
-      executor.goToStep(5); // Go to status page
+      await deleteExecution(execution.id);
+      refetch();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Execution failed'
-      );
+      setError(err instanceof Error ? err.message : 'No se pudo eliminar la ejecución');
     } finally {
-      setExecuting(false);
+      setDeletingId(null);
     }
   };
 
-  const handleNewExecution = () => {
-    setExecutionId(null);
-    setFinished(false);
-    executor.reset();
+  const handleRun = async (execution: Execution) => {
+    const radicados = execution.criteria?.radicados || [];
+    if (radicados.length === 0) {
+      setError('Agrega al menos un radicado antes de iniciar');
+      return;
+    }
+    if (!radicados.some((r) => r.documents.length > 0)) {
+      setError('Activa al menos un documento en algún radicado antes de iniciar');
+      return;
+    }
+    if (!execution.version_id) {
+      setError('Selecciona una versión antes de iniciar');
+      return;
+    }
+
+    setRunningId(execution.id);
+    setError(null);
+    try {
+      // Resolve the selected document codes to real PDF paths on disk.
+      const datasetRadicados = await getDatasetRadicados(execution.dataset_id, undefined, 500);
+      const byFullId = new Map(datasetRadicados.map((r) => [r.full_id, r]));
+      const pdfPaths: string[] = [];
+      for (const sel of radicados) {
+        const detail = byFullId.get(sel.full_id);
+        if (!detail) continue;
+        for (const doc of detail.documents) {
+          if (sel.documents.includes(doc.type)) pdfPaths.push(doc.path);
+        }
+      }
+
+      const response = await executeExtraction({
+        execution_id: execution.id,
+        dataset_id: execution.dataset_id,
+        pdf_paths: pdfPaths,
+        criteria: execution.criteria,
+        sample_size: pdfPaths.length,
+        version_id: execution.version_id,
+      });
+
+      setFinished(false);
+      setRunningExecutionId(response.execution_id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo iniciar la ejecución');
+    } finally {
+      setRunningId(null);
+    }
   };
 
   const handleStatusChange = (execution: Execution) => {
     setFinished(execution.status === 'success' || execution.status === 'failed');
   };
 
-  if (versionLoading) {
+  const handleBackToPlanning = () => {
+    setRunningExecutionId(null);
+    setFinished(false);
+    refetch();
+  };
+
+  if (versionsLoading) {
     return (
       <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
-        Cargando borrador de versión...
+        Cargando versiones...
       </div>
     );
   }
 
-  if (!version) {
+  if (versions.length === 0) {
     return (
       <div className="space-y-8">
         <div>
-          <h1 className="text-3xl font-bold">Launch Execution</h1>
+          <h1 className="text-3xl font-bold">Ejecuciones</h1>
         </div>
         <Card className="max-w-2xl">
           <CardContent className="space-y-4 pt-6 text-center text-muted-foreground">
             <p>
-              No hay un borrador de versión abierto. Crea uno desde
-              Changelog para empezar a registrar radicados y ejecutar.
+              Todavía no existe ninguna versión. Crea una desde Changelog
+              para poder asociarle ejecuciones.
             </p>
             <a href="/changelog">
               <Button>Ir a Changelog</Button>
@@ -113,18 +155,18 @@ export function Executor() {
     );
   }
 
-  if (executionId) {
+  if (runningExecutionId) {
     return (
       <div className="space-y-8">
         <div>
-          <h1 className="text-3xl font-bold">Execution in Progress</h1>
+          <h1 className="text-3xl font-bold">Ejecución en curso</h1>
         </div>
         <ExecutionStatus
-          executionId={executionId}
+          executionId={runningExecutionId}
           onStatusChange={handleStatusChange}
         />
         {finished && (
-          <Button onClick={handleNewExecution}>Nueva ejecución</Button>
+          <Button onClick={handleBackToPlanning}>Volver a planeación</Button>
         )}
       </div>
     );
@@ -132,153 +174,144 @@ export function Executor() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold">Launch Execution</h1>
-        <p className="text-muted-foreground">
-          Configure and launch a new extraction
-        </p>
-      </div>
-
-      <div className="max-w-2xl space-y-6">
-        <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950">
-          <Target className="mt-0.5 h-5 w-5 shrink-0 text-blue-600 dark:text-blue-400" />
-          <div>
-            <p className="text-sm font-medium">
-              Borrador de versión · <span className="font-mono">{version.version}</span>
-            </p>
-            {version.created_by && (
-              <p className="text-sm text-muted-foreground">
-                Creado por {version.created_by}
-              </p>
-            )}
-          </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Ejecuciones</h1>
+          <p className="text-muted-foreground">
+            Planifica y lanza extracciones por radicado
+          </p>
         </div>
-
-        {error && (
-          <div className="rounded-lg bg-red-100 p-4 text-red-800 dark:bg-red-900 dark:text-red-200">
-            {error}
-          </div>
-        )}
-
-        {/* Step 1 */}
-        {executor.step >= 1 && (
-          <DatasetSelector
-            onSelect={executor.setDataset}
-            selectedId={executor.selectedDataset?.id}
-          />
-        )}
-
-        {/* Step 2 */}
-        {executor.step >= 2 && executor.selectedDataset && (
-          <SampleCalculator
-            totalAvailable={executor.selectedDataset.pdf_count}
-            onSampleChange={executor.setSampleSize}
-            mandatoryRadicados={executor.mandatoryRadicados}
-          />
-        )}
-
-        {/* Step 2b: Execution Type */}
-        {executor.step >= 2 && executor.selectedDataset && (
-          <div className="max-w-xs">
-            <label className="text-sm font-medium mb-2 block">Execution Type</label>
-            <Select
-              value={executor.executionType}
-              onValueChange={(v) =>
-                executor.setExecutionType(v as 'total' | 'sample')
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="total">Total</SelectItem>
-                <SelectItem value="sample">Sample</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
-        {/* Step 2c: Previous Execution Selector */}
-        {executor.step >= 2 && executor.selectedDataset && (
-          <PreviousExecutionSelector
-            executionType={executor.executionType}
-            selectedExecution={executor.previousExecution}
-            onSelect={executor.setPreviousExecution}
-          />
-        )}
-
-        {/* Step 2d: Mandatory Radicados */}
-        {executor.step >= 2 && executor.selectedDataset && (
-          <MandatoryRadicados
-            radicados={executor.mandatoryRadicados}
-            onChange={executor.setMandatoryRadicados}
-            prestadoras={[
-              { nit: '800149384', nombre: 'Prestadora A' },
-              { nit: '800000001', nombre: 'Prestadora B' },
-            ]}
-          />
-        )}
-
-        {/* Step 3: Review */}
-        {executor.step >= 3 && executor.selectedDataset && (
-          <ExecutionReview
-            dataset={executor.selectedDataset}
-            sampleSize={executor.sampleSize}
-            selectedPDFCount={executor.selectedPDFs.length || executor.sampleSize || 1}
-            selectedIPs={executor.selectedIPs}
-            mandatoryRadicados={executor.mandatoryRadicados}
-            changelogVersion={version.version}
-          />
-        )}
-
-        {/* Navigation Buttons */}
-        {executor.step < 3 && (
-          <div className="flex gap-3">
-            {executor.step > 1 && (
-              <Button
-                variant="outline"
-                onClick={() => executor.goToStep(executor.step - 1)}
-              >
-                Back
-              </Button>
-            )}
-            <Button
-              onClick={() => executor.goToStep(executor.step + 1)}
-              disabled={
-                (executor.step === 1 && !executor.selectedDataset) ||
-                (executor.step === 2 && executor.sampleSize <= 0)
-              }
-            >
-              Next
+        <div className="flex gap-2">
+          <Link href="/executor/compare">
+            <Button variant="outline">
+              <GitCompare className="mr-2 h-4 w-4" />
+              Comparar ejecuciones
             </Button>
-          </div>
-        )}
-
-        {/* Execute Button */}
-        {executor.step >= 3 && (
-          <div className="flex gap-3">
-            <Button
-              variant="outline"
-              onClick={() => executor.goToStep(2)}
-            >
-              Back
-            </Button>
-            <Button
-              onClick={handleExecute}
-              disabled={
-                executing ||
-                !executor.selectedDataset ||
-                executor.sampleSize <= 0
-              }
-            >
-              {executing && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Iniciar ejecución
-            </Button>
-          </div>
-        )}
+          </Link>
+          <Button onClick={openNew}>
+            <Plus className="mr-2 h-4 w-4" />
+            Nueva ejecución
+          </Button>
+        </div>
       </div>
+
+      {error && (
+        <div className="rounded-lg bg-red-100 p-4 text-red-800 dark:bg-red-900 dark:text-red-200">
+          {error}
+        </div>
+      )}
+
+      <Card>
+        <CardContent className="pt-6">
+          {executionsLoading ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Cargando ejecuciones...
+            </div>
+          ) : executions.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground">
+              No hay ejecuciones en planeación. Crea una para empezar.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Dataset</TableHead>
+                  <TableHead>Versión</TableHead>
+                  <TableHead>Radicados</TableHead>
+                  <TableHead>Documentos</TableHead>
+                  <TableHead>Creado por</TableHead>
+                  <TableHead>Creado</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {executions.map((execution) => {
+                  const radicados = execution.criteria?.radicados || [];
+                  const docCount = radicados.reduce(
+                    (sum, r) => sum + r.documents.length,
+                    0
+                  );
+                  const executionVersion = execution.version_id
+                    ? versionsById.get(execution.version_id)
+                    : undefined;
+                  return (
+                    <TableRow key={execution.id}>
+                      <TableCell className="font-medium">
+                        {execution.dataset_id}
+                      </TableCell>
+                      <TableCell>
+                        {executionVersion ? (
+                          <span className="font-mono text-sm">
+                            {executionVersion.version}
+                            {executionVersion.status === 'open' && (
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                (borrador)
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </TableCell>
+                      <TableCell>{radicados.length}</TableCell>
+                      <TableCell>{docCount}</TableCell>
+                      <TableCell>{execution.created_by || '—'}</TableCell>
+                      <TableCell>
+                        {format(new Date(execution.created_at), 'MMM dd, HH:mm')}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEdit(execution)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDelete(execution)}
+                            disabled={deletingId === execution.id}
+                          >
+                            {deletingId === execution.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => handleRun(execution)}
+                            disabled={runningId === execution.id || docCount === 0}
+                          >
+                            {runningId === execution.id ? (
+                              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Play className="mr-1.5 h-3.5 w-3.5" />
+                            )}
+                            Iniciar
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <ExecutionEditor
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
+        execution={editing}
+        datasets={datasets}
+        versions={versions}
+        onSaved={refetch}
+      />
     </div>
   );
 }

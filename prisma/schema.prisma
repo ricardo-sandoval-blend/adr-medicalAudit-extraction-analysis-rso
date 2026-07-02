@@ -110,9 +110,10 @@ model StructureVersion {
 // its own small lifecycle, independent of the version draft's: opened with
 // just document type + a plan ("voy a trabajar en esto") + the issue link,
 // then closed later (same day, once resolved) with the resolution — what was
-// actually implemented to solve it. version_id points at the first-class
-// Version (a version draft). Bullets are grouped by document_type when
-// displayed.
+// actually implemented to solve it. A closed bullet can later be rolled back
+// (status='reverted') if the implemented change had to be undone, recording
+// why. version_id points at the first-class Version (a version draft).
+// Bullets are grouped by document_type when displayed.
 model IncidentLink {
   id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   version_id     String    @db.Uuid
@@ -121,12 +122,15 @@ model IncidentLink {
   title          String?   @db.VarChar(1024)
   document_type  String?   @db.VarChar(50)
   description    String?   // the plan: what will be worked on
-  status         String    @default("open") @db.VarChar(20) // 'open' | 'closed'
+  status         String    @default("open") @db.VarChar(20) // 'open' | 'closed' | 'reverted'
   resolution     String?   // what was implemented to solve it, set on close
   created_at     DateTime  @default(now()) @db.Timestamp(6)
   created_by     String?   @db.VarChar(255) // email of who registered this bullet
   closed_at      DateTime? @db.Timestamp(6)
   closed_by      String?   @db.VarChar(255) // email of who resolved this bullet
+  reverted_at    DateTime? @db.Timestamp(6)
+  reverted_by    String?   @db.VarChar(255) // email of who rolled this bullet back
+  revert_reason  String?   // why the implemented change was rolled back
 
   version        Version  @relation(fields: [version_id], references: [id], onDelete: Cascade)
 

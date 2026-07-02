@@ -6,32 +6,45 @@ import { Dataset, Execution } from '@/lib/types';
 
 const DATASETS_PATH = process.env.DATASETS_PATH || join(process.cwd(), 'datasets');
 
-async function calculateDirSize(dirPath: string): Promise<number> {
-  let size = 0;
+// A dataset directory holds one subfolder per radicado (e.g.
+// 'datasets/prod-234/000930_800149384_70563119/'), each containing that
+// radicado's PDF documents. Some datasets may still use a flat layout with
+// PDFs directly at the root, so both are counted here.
+async function scanDataset(
+  dirPath: string
+): Promise<{ pdfCount: number; sizeBytes: number; radicadoCount: number }> {
+  let pdfCount = 0;
+  let sizeBytes = 0;
+  let radicadoCount = 0;
+
   try {
-    const files = await readdir(dirPath);
-    for (const file of files) {
-      const filePath = join(dirPath, file);
-      const fileStats = await stat(filePath);
-      if (fileStats.isFile()) {
-        size += fileStats.size;
+    const entries = await readdir(dirPath);
+    for (const entry of entries) {
+      const entryPath = join(dirPath, entry);
+      const entryStats = await stat(entryPath);
+
+      if (entryStats.isDirectory()) {
+        radicadoCount++;
+        const files = await readdir(entryPath);
+        for (const file of files) {
+          if (!file.toLowerCase().endsWith('.pdf')) continue;
+          const fileStats = await stat(join(entryPath, file));
+          if (fileStats.isFile()) {
+            pdfCount++;
+            sizeBytes += fileStats.size;
+          }
+        }
+      } else if (entryStats.isFile() && entry.toLowerCase().endsWith('.pdf')) {
+        // Flat layout fallback: PDFs directly under the dataset root.
+        pdfCount++;
+        sizeBytes += entryStats.size;
       }
     }
   } catch {
     // Ignore errors
   }
-  return size;
-}
 
-async function countPDFs(dirPath: string): Promise<number> {
-  let count = 0;
-  try {
-    const files = await readdir(dirPath);
-    count = files.filter((f) => f.endsWith('.pdf')).length;
-  } catch {
-    // Ignore errors
-  }
-  return count;
+  return { pdfCount, sizeBytes, radicadoCount };
 }
 
 async function getLastExecution(
@@ -61,9 +74,7 @@ export async function GET(request: NextRequest) {
       const dirStats = await stat(dirPath);
 
       if (dirStats.isDirectory()) {
-        const pdfCount = await countPDFs(dirPath);
-        const sizeMb =
-          (await calculateDirSize(dirPath)) / (1024 * 1024);
+        const { pdfCount, sizeBytes, radicadoCount } = await scanDataset(dirPath);
         const lastExecution = await getLastExecution(dirName);
 
         datasets.push({
@@ -71,7 +82,8 @@ export async function GET(request: NextRequest) {
           name: dirName,
           path: dirPath,
           pdf_count: pdfCount,
-          total_size_mb: Math.round(sizeMb * 100) / 100,
+          total_size_mb: Math.round((sizeBytes / (1024 * 1024)) * 100) / 100,
+          radicado_count: radicadoCount,
           last_execution: lastExecution || undefined,
         });
       }

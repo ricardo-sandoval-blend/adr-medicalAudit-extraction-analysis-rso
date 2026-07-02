@@ -28,7 +28,7 @@ export function DatasetSelector({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Step 1: Select Dataset</CardTitle>
+        <CardTitle>Seleccionar dataset</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {error && (
@@ -59,6 +59,10 @@ export function DatasetSelector({
 
             {selected && (
               <div className="space-y-2 rounded-lg bg-muted p-4">
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium">Radicados:</span>
+                  <span className="text-sm">{selected.radicado_count ?? '—'}</span>
+                </div>
                 <div className="flex justify-between">
                   <span className="text-sm font-medium">PDFs:</span>
                   <span className="text-sm">{selected.pdf_count}</span>

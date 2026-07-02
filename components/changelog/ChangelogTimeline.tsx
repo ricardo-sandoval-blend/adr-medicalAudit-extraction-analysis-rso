@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   User,
   CircleDot,
+  RotateCcw,
 } from 'lucide-react';
 import { Execution, IncidentLink } from '@/lib/types';
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPES } from '@/lib/config';
@@ -24,6 +25,7 @@ import {
   addIncident,
   removeIncident,
   closeIncident,
+  rollbackIncident,
   closeVersion,
 } from '@/lib/api-client';
 
@@ -101,10 +103,14 @@ function BulletRow({
   const { user } = useKeycloak();
   const [showCloseForm, setShowCloseForm] = useState(false);
   const [resolution, setResolution] = useState('');
+  const [showRollbackForm, setShowRollbackForm] = useState(false);
+  const [rollbackReason, setRollbackReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isBulletOpen = bullet.status === 'open';
+  const isResolved = bullet.status === 'closed';
+  const isReverted = bullet.status === 'reverted';
 
   const handleCloseBullet = async () => {
     if (!resolution.trim()) return;
@@ -126,13 +132,38 @@ function BulletRow({
     }
   };
 
+  const handleRollback = async () => {
+    if (!rollbackReason.trim()) return;
+    try {
+      setSaving(true);
+      setError(null);
+      await rollbackIncident(bullet.id, {
+        reason: rollbackReason.trim(),
+        revertedBy: user?.email || user?.name,
+      });
+      setShowRollbackForm(false);
+      onChanged();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to rollback bullet'
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="rounded border border-slate-200 px-3 py-2 dark:border-slate-800">
-      <Badge variant={isBulletOpen ? 'outline' : 'secondary'}>
+      <Badge variant={isBulletOpen ? 'outline' : isReverted ? 'destructive' : 'secondary'}>
         {isBulletOpen ? (
           <span className="flex items-center gap-1">
             <CircleDot className="h-3 w-3" />
             En progreso
+          </span>
+        ) : isReverted ? (
+          <span className="flex items-center gap-1">
+            <RotateCcw className="h-3 w-3" />
+            Revertido
           </span>
         ) : (
           <span className="flex items-center gap-1">
@@ -160,6 +191,15 @@ function BulletRow({
         </p>
       )}
 
+      {bullet.revert_reason && (
+        <p className="mt-1 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+          <span className="text-xs font-medium text-red-500 dark:text-red-400">
+            Razón del rollback:{' '}
+          </span>
+          {bullet.revert_reason}
+        </p>
+      )}
+
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
         <a
           href={bullet.clickup_url}
@@ -182,10 +222,16 @@ function BulletRow({
               {bullet.created_by}
             </span>
           )}
-          {!isBulletOpen && bullet.closed_by && (
+          {isResolved && bullet.closed_by && (
             <span className="flex items-center gap-1" title="Resuelto por">
               <CheckCircle2 className="h-3 w-3" />
               {bullet.closed_by}
+            </span>
+          )}
+          {isReverted && bullet.reverted_by && (
+            <span className="flex items-center gap-1" title="Revertido por">
+              <RotateCcw className="h-3 w-3" />
+              {bullet.reverted_by}
             </span>
           )}
           {isVersionOpen && isBulletOpen && (
@@ -194,6 +240,14 @@ function BulletRow({
               className="text-blue-600 hover:underline dark:text-blue-400"
             >
               Cerrar
+            </button>
+          )}
+          {isVersionOpen && isResolved && (
+            <button
+              onClick={() => setShowRollbackForm((v) => !v)}
+              className="text-amber-600 hover:underline dark:text-amber-400"
+            >
+              Rollback
             </button>
           )}
           {isVersionOpen && (
@@ -232,6 +286,39 @@ function BulletRow({
               size="sm"
               variant="outline"
               onClick={() => setShowCloseForm(false)}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {showRollbackForm && (
+        <div className="mt-3 space-y-2 rounded bg-slate-50 p-2 dark:bg-slate-900">
+          {error && (
+            <div className="rounded bg-red-100 p-2 text-xs text-red-800 dark:bg-red-900 dark:text-red-200">
+              {error}
+            </div>
+          )}
+          <textarea
+            placeholder="¿Por qué se revirtió este cambio?"
+            value={rollbackReason}
+            onChange={(e) => setRollbackReason(e.target.value)}
+            className="h-16 w-full rounded border border-input bg-background px-2 py-2 text-sm"
+          />
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={handleRollback}
+              disabled={saving || !rollbackReason.trim()}
+            >
+              {saving ? 'Guardando...' : 'Confirmar rollback'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowRollbackForm(false)}
             >
               Cancelar
             </Button>
@@ -331,7 +418,7 @@ function VersionCardEntry({
                 {entry.version}
               </h3>
               <Badge variant={isOpen ? 'default' : 'secondary'}>
-                {isOpen ? 'Borrador' : 'Cerrada'}
+                {isOpen ? 'Borrador' : 'Publicada'}
               </Badge>
               {isLatest && (
                 <span className="inline-flex items-center rounded px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800">
@@ -353,7 +440,7 @@ function VersionCardEntry({
               {entry.closed_at && (
                 <span className="flex items-center gap-1">
                   <CheckCircle2 className="h-4 w-4" />
-                  Cerrada {safeFormat(entry.closed_at)}
+                  Publicada {safeFormat(entry.closed_at)}
                 </span>
               )}
             </div>
@@ -367,7 +454,7 @@ function VersionCardEntry({
               disabled={closing}
             >
               <Lock className="h-4 w-4 mr-1" />
-              {closing ? 'Cerrando...' : 'Cerrar versión'}
+              {closing ? 'Publicando...' : 'Publicar versión'}
             </Button>
           )}
         </div>
@@ -529,10 +616,8 @@ export function ChangelogTimeline({
       {versions.map((entry, index) => (
         <div key={entry.id} className="relative mb-12 pl-24 md:pl-32">
           {/* Timeline dot */}
-          <div className="absolute left-2 top-2 md:left-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white dark:bg-slate-950 border-2 border-slate-300 dark:border-slate-700">
-              <div className="h-2 w-2 rounded-full bg-slate-900 dark:bg-slate-100" />
-            </div>
+          <div className="absolute left-8 top-7 -translate-x-1/2 -translate-y-1/2 md:left-12">
+            <div className="h-3 w-3 rounded-full bg-slate-900 dark:bg-slate-100" />
           </div>
 
           <VersionCardEntry

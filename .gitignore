@@ -35,6 +35,7 @@ pnpm-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# sensitive/large data (not for version control)
-/datasets/
-/executions/
+# sensitive/large data (not for version control) — datasets, execution
+# history, changelog markdown and the Postgres data directory, consolidated
+# under one host folder (see docker-compose.yml)
+/volume/

@@ -6,14 +6,14 @@ This is a Next.js 16 dashboard for monitoring and managing PDF extraction to str
 
 **3 Pages:**
 1. **/dashboard** - Execution overview with metrics and charts
-2. **/executor** - Wizard to launch new extractions
+2. **/executor** - Planning table for executions: pick a dataset, drag radicados into it, choose which documents to run, then launch
 3. **/changelog** - Version history with incident tracking
 
 ## Prerequisites
 
 - Node.js 18+ / pnpm
 - Docker & Docker Compose
-- Datasets folder at `@datasets/prod234` (specified in env vars)
+- Datasets folder at `./volume/datasets/<name>` (path configurable via `DATASETS_PATH`)
 
 ## Local Setup
 
@@ -29,7 +29,10 @@ Or set it manually:
 ```
 DATABASE_URL="postgresql://adr_user:adr_password_dev@localhost:5432/adr_extraction"
 NODE_ENV=development
-CHANGELOG_PATH=./data/changelog
+DATASETS_PATH=./volume/datasets
+EXECUTIONS_PATH=./volume/executions
+CHANGELOG_PATH=./volume/changelog
+GROUND_TRUTH_PATH=./volume/ground-truth
 ```
 
 ### 2. Run the full stack with Docker
@@ -54,10 +57,14 @@ running `nextjs` container at runtime via `env_file`.
 This creates:
 - PostgreSQL 16 on `localhost:5432`
 - Next.js on `localhost:3000`, with the Prisma schema applied automatically
-- Volumes mounted into the `nextjs` container:
-  - `./datasets` → `/app/datasets` (readonly)
-  - `./data/changelog` → `/app/data/changelog`
-  - `./executions` → `/app/executions`
+- All persistent data lives under a single host folder, `./volume`, bind-mounted
+  into both containers (Postgres's data directory included, so nothing lives in
+  an opaque named Docker volume):
+  - `./volume/db` → Postgres data directory
+  - `./volume/datasets` → `/app/datasets` (readonly)
+  - `./volume/changelog` → `/app/data/changelog`
+  - `./volume/executions` → `/app/executions`
+  - `./volume/ground-truth` → `/app/ground-truth`
 
 Database credentials:
 - User: `adr_user`
@@ -119,7 +126,7 @@ pnpm prisma db push --skip-generate --force-reset
 ```
 DATABASE_URL="postgresql://user:password@host:port/dbname"
 NODE_ENV=development
-CHANGELOG_PATH=./data/changelog
+CHANGELOG_PATH=./volume/changelog
 ```
 
 ## Database Schema
@@ -161,28 +168,24 @@ Managed by Prisma. Auto-applied when the `nextjs` container starts (see `docker-
 
 ## Datasets Structure
 
-Expected filesystem layout:
+Actual filesystem layout — one subfolder per radicado, no `request.json`:
 
 ```
-datasets/
-├── dataset1/
-│   ├── file1.pdf
-│   ├── file2.pdf
-│   └── request.json    ← Contains metadata (prestadoras, etc)
+volume/datasets/
+├── prod-234/
+│   ├── 000930_800149384_70563119/       ← one folder per radicado ({numero}_{nit}_{suffix})
+│   │   ├── ADM_800149384_70563119.pdf   ← one PDF per document, prefixed by its 3-letter type code
+│   │   ├── EPI_800149384_70563119.pdf
+│   │   └── ...
+│   ├── 000931_800149384_70563149/
+│   │   └── ...
 ├── dataset2/
 │   ├── ...
 ```
 
-`request.json` example:
-```json
-{
-  "prestadoras": [
-    {"nit": "800149384", "nombre": "Prestadora A"},
-    {"nit": "800000001", "nombre": "Prestadora B"}
-  ],
-  "radicados": [...]
-}
-```
+`numero` and `nit` are parsed straight from the folder name; the document type
+code (matching `DOCUMENT_TYPES` in `lib/config.ts`, e.g. `ADM`, `FAC`, `HAU`)
+is parsed from the filename prefix. See `app/api/datasets/[id]/radicados/route.ts`.
 
 ## Changelog
 
@@ -197,7 +200,7 @@ datasets/
 ### Storage
 Markdown files stored in filesystem volume:
 ```
-data/changelog/
+volume/changelog/
 ├── v1.0.0.md
 ├── v1.0.1.md
 ├── v1.0.2.md

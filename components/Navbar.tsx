@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { BarChart3, Zap, BookOpen } from 'lucide-react';
+import { BarChart3, Zap, BookOpen, Target } from 'lucide-react';
 
 export function Navbar() {
   const pathname = usePathname();
@@ -23,6 +23,11 @@ export function Navbar() {
       href: '/changelog',
       label: 'Changelog',
       icon: BookOpen,
+    },
+    {
+      href: '/ground-truth',
+      label: 'Ground Truth',
+      icon: Target,
     },
   ];
 
