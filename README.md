@@ -79,11 +79,18 @@ docker push $ECR/$REPO:latest
 
 ### 2. Pull + reload en el bastion
 
+`/opt/adr-extraction-analysis` usa **`docker-compose.prod.yml`** (no
+`docker-compose.yml` — ese es solo para local/build). Ese archivo apunta
+`nextjs` directo a la imagen de ECR y carga las vars runtime
+(`KEYCLOAK_ISSUER`, `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET`, etc.) desde
+un **`.env`** en esa misma carpeta — `.env`, no `.env.local`; ese archivo no
+viene del repo (está en `.gitignore`), se crea a mano una sola vez.
+
 Entra al bastion (SSM o SSH según corresponda), cambia al usuario `app` y ejecuta:
 
 ```bash
 sudo su - app
-cd /opt/adr-extraction-analysis   # TODO: confirmar ruta real en el bastion
+cd /opt/adr-extraction-analysis
 
 # Login al registry desde la instancia (usa el rol IAM, no necesita credenciales)
 aws ecr get-login-password --region us-east-1 \
@@ -91,18 +98,15 @@ aws ecr get-login-password --region us-east-1 \
     276553701208.dkr.ecr.us-east-1.amazonaws.com
 
 # Bajar la nueva imagen del servicio nextjs
-docker compose pull nextjs
+docker compose -f docker-compose.prod.yml pull nextjs
 
 # Recrear el contenedor con la imagen nueva (sin tocar postgres ni el volume de datos)
-docker compose up -d --no-build
+docker compose -f docker-compose.prod.yml up -d
 ```
 
-El `docker-compose.yml` del bastion debe apuntar el servicio `nextjs` a la
-imagen de ECR (`image: $ECR/$REPO:latest`) en vez de `build: context: .` —
-el resto (servicio `postgres`, variables de entorno, volúmenes) queda igual
-que en el `docker-compose.yml` de este repo. Los datos quedan intactos entre
-reinicios porque viven en el bind mount de `./volume` (o la ruta absoluta que
-se configure en el host, p. ej. `/home/ubuntu/data/adr-extraction-analysis`).
+Los datos quedan intactos entre reinicios porque viven en el bind mount de
+`./volume` (o la ruta absoluta que se configure en el host, p. ej.
+`/home/ubuntu/data/adr-extraction-analysis`).
 
 ## Estructura
 
