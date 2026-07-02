@@ -47,15 +47,17 @@ pnpm start          # http://localhost:3000
 
 ## Deploy en el bastion (flujo habitual ante un cambio)
 
-> ⚠️ Pendiente de confirmar con infra: ruta del bastion. El repo ECR ya existe
-> (ver abajo); los demás valores siguen el mismo patrón usado en
-> `adr-fp-fn-analysis` (cuenta `276553701208`, región `us-east-1`).
+Corre en `adr-test-medicalaudit-bastioninstance` (`i-07eb9e02496576639`, cuenta
+`276553701208`, `us-east-1`), la misma máquina que `fp-fn-analysis`. CloudFront
+apunta directo a esa instancia por un VPC Origin (sin load balancer), puerto
+3000 → `https://d1xn7ji2z2yz1l.cloudfront.net`.
 
 El bastion corre el contenedor de la app (`nextjs`) desde una imagen en ECR; el
 servicio `postgres` sigue corriendo localmente en el bastion vía Docker Compose
-(no se publica en ECR). Los datos (`volume/db`, `volume/datasets`,
-`volume/executions`, `volume/changelog`, `volume/ground-truth`) persisten en un
-bind mount en el host.
+(no se publica en ECR). Los datos (`db`, `datasets`, `executions`, `changelog`,
+`ground-truth`) persisten en `/home/ubuntu/data/extraction-analysis` — el disco
+grande (`nvme1n1`, 2TB), no en `./volume` relativo al repo — mismo patrón que
+`/home/ubuntu/data/fp-fn-analysis`.
 
 ### 1. Build + push de la imagen (desde tu máquina local)
 

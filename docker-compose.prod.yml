@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: adr_user
       POSTGRES_PASSWORD: adr_password_dev
     volumes:
-      - ./volume/db:/var/lib/postgresql/data
+      - /home/ubuntu/data/extraction-analysis/db:/var/lib/postgresql/data
       - ./prisma/init.sql:/docker-entrypoint-initdb.d/01-init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U adr_user -d adr_extraction"]
@@ -41,10 +41,10 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./volume/datasets:/app/datasets:ro
-      - ./volume/changelog:/app/data/changelog
-      - ./volume/executions:/app/executions
-      - ./volume/ground-truth:/app/ground-truth
+      - /home/ubuntu/data/extraction-analysis/datasets:/app/datasets:ro
+      - /home/ubuntu/data/extraction-analysis/changelog:/app/data/changelog
+      - /home/ubuntu/data/extraction-analysis/executions:/app/executions
+      - /home/ubuntu/data/extraction-analysis/ground-truth:/app/ground-truth
     networks:
       - adr-network
     restart: unless-stopped
@@ -65,6 +65,11 @@ networks:
 # - El puerto 5432 de postgres no se publica al host: `nextjs` lo alcanza por
 #   la red interna `adr-network`; si necesitas psql directo desde el bastion,
 #   usa `docker exec -it adr-postgres psql -U adr_user -d adr_extraction`.
+#
+# - Todos los datos persistentes viven en /home/ubuntu/data/extraction-analysis
+#   (disco nvme1n1, 2TB), NO en ./volume relativo a este repo — ese disco es
+#   el que sobrevive a un reemplazo de la instancia. Subcarpetas: db, datasets,
+#   changelog, executions, ground-truth (mismo patrón que /home/ubuntu/data/fp-fn-analysis).
 #
 # Deploy:
 #   docker compose -f docker-compose.prod.yml pull nextjs
