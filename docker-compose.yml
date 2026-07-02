@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: adr-postgres
+    environment:
+      POSTGRES_DB: adr_extraction
+      POSTGRES_USER: adr_user
+      POSTGRES_PASSWORD: adr_password_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./prisma/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adr_user -d adr_extraction"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - adr-network
+
+  nextjs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_KEYCLOAK_URL: ${NEXT_PUBLIC_KEYCLOAK_URL:-}
+        NEXT_PUBLIC_KEYCLOAK_REALM: ${NEXT_PUBLIC_KEYCLOAK_REALM:-}
+        NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: ${NEXT_PUBLIC_KEYCLOAK_CLIENT_ID:-}
+    container_name: adr-nextjs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.local
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://adr_user:adr_password_dev@postgres:5432/adr_extraction
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: adr_user
+      DB_PASSWORD: adr_password_dev
+      DB_NAME: adr_extraction
+      DATASETS_PATH: /app/datasets
+      CHANGELOG_PATH: /app/data/changelog
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./datasets:/app/datasets:ro
+      - ./data/changelog:/app/data/changelog
+      - ./executions:/app/executions
+    networks:
+      - adr-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  adr-network:
+    driver: bridge
+
+# Notes:
+# - Data volumes are mounted from local directories:
+#   - ./datasets: Contains PDFs and request.json for each dataset (read-only)
+#   - ./data/changelog: Contains markdown files for changelog versions
+#   - ./executions: Execution history written by the app
+#
+# - The `nextjs` service applies the Prisma schema (`prisma db push`) automatically
+#   on container startup via docker-entrypoint.sh, then starts the app.
+#
+# - NEXT_PUBLIC_* Keycloak vars are baked in at build time. They're read from the
+#   shell/.env.local via compose variable interpolation, so build them with:
+#     docker compose --env-file .env.local up --build
+#
+# To start everything:
+#   docker compose --env-file .env.local up --build

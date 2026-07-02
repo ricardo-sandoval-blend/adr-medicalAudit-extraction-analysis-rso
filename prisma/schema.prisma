@@ -1,0 +1,137 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Execution {
+  // status lifecycle: 'draft' (accumulating radicados, freely editable) ->
+  // 'running' (started, mock/real extraction in progress) -> 'success' | 'failed'.
+  // A draft is created/updated from the Executor while the team adds mandatory
+  // radicados during the day; it is finalized (draft -> running) when "Iniciar" is pressed.
+  id                    String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  dataset_id            String   @db.VarChar(255)
+  created_at            DateTime @default(now()) @db.Timestamp(6)
+  completed_at          DateTime? @db.Timestamp(6)
+  status                String   @default("pending") @db.VarChar(50)
+  total_documents       Int      @default(0)
+  successful_count      Int      @default(0)
+  error_count           Int      @default(0)
+  pdf_count             Int      @default(0)
+  metrics               Json     @default("{}")
+  criteria              Json     @default("{}")
+  changelog_version     String?  @db.VarChar(50)
+  version_id            String?  @db.Uuid
+  errors                String[]
+  previous_execution_id String?  @unique @db.Uuid
+  created_by            String?  @db.VarChar(255)
+
+  previous_execution    Execution?  @relation("PreviousExecution", fields: [previous_execution_id], references: [id], onDelete: SetNull)
+  subsequent_execution  Execution?  @relation("PreviousExecution")
+
+  version               Version? @relation(fields: [version_id], references: [id], onDelete: SetNull)
+
+  structure_versions    StructureVersion[]
+  execution_metrics     ExecutionMetric[]
+
+  @@unique([dataset_id, created_at])
+  @@index([dataset_id])
+  @@index([created_at(sort: Desc)])
+  @@index([status])
+  @@index([version_id])
+  @@map("executions")
+}
+
+// A version draft: opened once per day/cycle, its content is the set of
+// bullets (see IncidentLink below) worked during the day, it can have many
+// executions run against it, and is closed manually once a run measures
+// well. Application layer enforces that at most one version has
+// status = 'open' (draft) at a time.
+model Version {
+  id                String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  version           String    @unique @db.VarChar(50)
+  status            String    @default("open") @db.VarChar(20)
+  created_at        DateTime  @default(now()) @db.Timestamp(6)
+  closed_at         DateTime? @db.Timestamp(6)
+  created_by        String?   @db.VarChar(255) // email of who opened the version
+
+  executions        Execution[]
+  incident_links    IncidentLink[]
+
+  @@index([status])
+  @@index([created_at(sort: Desc)])
+  @@map("versions")
+}
+
+model ExecutionMetric {
+  id            String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  execution_id  String   @db.Uuid
+  metric_key    String   @db.VarChar(255)
+  current_value Decimal? @db.Decimal(15, 4)
+  previous_value Decimal? @db.Decimal(15, 4)
+  delta         Decimal? @db.Decimal(15, 4)
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+
+  execution     Execution @relation(fields: [execution_id], references: [id], onDelete: Cascade)
+
+  @@unique([execution_id, metric_key])
+  @@index([execution_id])
+  @@index([metric_key])
+  @@map("execution_metrics")
+}
+
+// Deprecated / unused: superseded by the first-class `Version` model above.
+// Kept only so `prisma db push` doesn't drop the existing table; nothing reads
+// or writes to it anymore.
+model StructureVersion {
+  id                  String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  execution_id        String   @db.Uuid
+  version             String   @db.VarChar(50)
+  fields              Json     @default("{}")
+  previous_version_id String?  @unique @db.Uuid
+  created_at          DateTime @default(now()) @db.Timestamp(6)
+
+  execution           Execution @relation(fields: [execution_id], references: [id], onDelete: Cascade)
+  previous_version    StructureVersion? @relation("PreviousVersion", fields: [previous_version_id], references: [id], onDelete: SetNull)
+  next_version        StructureVersion? @relation("PreviousVersion")
+
+  @@unique([execution_id, version])
+  @@index([execution_id])
+  @@index([version])
+  @@map("structure_versions")
+}
+
+// A "bullet" in the changelog: a ClickUp issue worked during the day. It has
+// its own small lifecycle, independent of the version draft's: opened with
+// just document type + a plan ("voy a trabajar en esto") + the issue link,
+// then closed later (same day, once resolved) with the resolution — what was
+// actually implemented to solve it. version_id points at the first-class
+// Version (a version draft). Bullets are grouped by document_type when
+// displayed.
+model IncidentLink {
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  version_id     String    @db.Uuid
+  clickup_id     String    @db.VarChar(255)
+  clickup_url    String?   @db.VarChar(2048)
+  title          String?   @db.VarChar(1024)
+  document_type  String?   @db.VarChar(50)
+  description    String?   // the plan: what will be worked on
+  status         String    @default("open") @db.VarChar(20) // 'open' | 'closed'
+  resolution     String?   // what was implemented to solve it, set on close
+  created_at     DateTime  @default(now()) @db.Timestamp(6)
+  created_by     String?   @db.VarChar(255) // email of who registered this bullet
+  closed_at      DateTime? @db.Timestamp(6)
+  closed_by      String?   @db.VarChar(255) // email of who resolved this bullet
+
+  version        Version  @relation(fields: [version_id], references: [id], onDelete: Cascade)
+
+  @@unique([version_id, clickup_id])
+  @@index([version_id])
+  @@index([clickup_id])
+  @@map("incident_links")
+}
