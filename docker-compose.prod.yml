@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: adr-postgres
+    environment:
+      POSTGRES_DB: adr_extraction
+      POSTGRES_USER: adr_user
+      POSTGRES_PASSWORD: adr_password_dev
+    volumes:
+      - /home/ubuntu/data/extraction-analysis/db:/var/lib/postgresql/data
+      - ./prisma/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adr_user -d adr_extraction"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - adr-network
+    restart: unless-stopped
+
+  nextjs:
+    image: 276553701208.dkr.ecr.us-east-1.amazonaws.com/adr-test-medicalaudit-extraction-ecr:latest
+    container_name: adr-nextjs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://adr_user:adr_password_dev@postgres:5432/adr_extraction
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: adr_user
+      DB_PASSWORD: adr_password_dev
+      DB_NAME: adr_extraction
+      DATASETS_PATH: /app/datasets
+      CHANGELOG_PATH: /app/data/changelog
+      EXECUTIONS_PATH: /app/executions
+      GROUND_TRUTH_PATH: /app/ground-truth
+    ports:
+      - "3000:3000"
+    volumes:
+      - /home/ubuntu/data/extraction-analysis/datasets:/app/datasets:ro
+      - /home/ubuntu/data/extraction-analysis/changelog:/app/data/changelog
+      - /home/ubuntu/data/extraction-analysis/executions:/app/executions
+      - /home/ubuntu/data/extraction-analysis/ground-truth:/app/ground-truth
+    networks:
+      - adr-network
+    restart: unless-stopped
+
+networks:
+  adr-network:
+    driver: bridge
+
+# Compose file para el bastion (NO se usa en local, ver docker-compose.yml):
+# - `nextjs` usa la imagen ya construida en ECR en vez de `build:` — no se
+#   compila nada en el bastion.
+# - Las vars NEXT_PUBLIC_* ya quedaron horneadas en la imagen en build time
+#   (build local + push), por eso aquí no hay `args:`.
+# - `env_file: .env` carga KEYCLOAK_ISSUER / KEYCLOAK_CLIENT_ID /
+#   KEYCLOAK_CLIENT_SECRET (y cualquier otra var runtime) desde
+#   /opt/adr-extraction-analysis/.env — ese archivo no viene del repo, se crea
+#   a mano en el bastion.
+# - El puerto 5432 de postgres no se publica al host: `nextjs` lo alcanza por
+#   la red interna `adr-network`; si necesitas psql directo desde el bastion,
+#   usa `docker exec -it adr-postgres psql -U adr_user -d adr_extraction`.
+#
+# - Todos los datos persistentes viven en /home/ubuntu/data/extraction-analysis
+#   (disco nvme1n1, 2TB), NO en ./volume relativo a este repo — ese disco es
+#   el que sobrevive a un reemplazo de la instancia. Subcarpetas: db, datasets,
+#   changelog, executions, ground-truth (mismo patrón que /home/ubuntu/data/fp-fn-analysis).
+#
+# Deploy:
+#   docker compose -f docker-compose.prod.yml pull nextjs
+#   docker compose -f docker-compose.prod.yml up -d
