@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, type DragEvent } from 'react';
+import { useState, useMemo, useEffect, type DragEvent } from 'react';
 import { useDatasetRadicados } from '@/hooks/useDatasetRadicados';
 import { useKeycloak } from '@/lib/keycloak';
 import { createExecution, updateExecution } from '@/lib/api-client';
@@ -53,7 +53,28 @@ export function ExecutionEditor({
   versions,
   onSaved,
 }: ExecutionEditorProps) {
-  const handleClose = () => {
+  const [creating, setCreating] = useState(false);
+  const [formRef, setFormRef] = useState<{ getName: () => string; getRadicados: () => string[] } | null>(null);
+
+  const handleClose = async () => {
+    // When closing, create the folder on disk if this is a new execution
+    if (!execution && formRef) {
+      const name = formRef.getName();
+      const radicados = formRef.getRadicados();
+      if (name) {
+        setCreating(true);
+        try {
+          await fetch('/api/executions/create-folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, radicados }),
+          });
+        } catch {
+          // Best effort
+        }
+        setCreating(false);
+      }
+    }
     onOpenChange(false);
     onSaved();
   };
@@ -65,10 +86,6 @@ export function ExecutionEditor({
         if (!v) handleClose();
       }}
     >
-      {/* DialogContent's base styles ship a `sm:max-w-md` cap; overriding
-          with an unprefixed `max-w-*` loses that cascade fight at desktop
-          widths (twMerge doesn't treat different breakpoint variants as
-          conflicting), so the override must match the `sm:` prefix. */}
       <DialogContent className="flex max-h-[85vh] w-full flex-col overflow-y-auto sm:max-w-[39.2rem]">
         <DialogHeader>
           <DialogTitle>
@@ -76,20 +93,27 @@ export function ExecutionEditor({
           </DialogTitle>
         </DialogHeader>
 
-        {/* Keyed by execution id so switching between "new" and editing a
-            different draft mounts a fresh form with its own initial state,
-            instead of resetting state via an effect. */}
         {open && (
           <ExecutionEditorForm
             key={execution?.id ?? 'new'}
             execution={execution}
             datasets={datasets}
             versions={versions}
+            onFormRef={setFormRef}
           />
         )}
 
         <DialogFooter>
-          <Button onClick={handleClose}>Listo</Button>
+          <Button onClick={handleClose} disabled={creating}>
+            {creating ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Creando...
+              </>
+            ) : (
+              'Listo'
+            )}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -100,11 +124,13 @@ interface FormProps {
   execution: Execution | null;
   datasets: Dataset[];
   versions: Version[];
+  onFormRef: (ref: { getName: () => string; getRadicados: () => string[] } | null) => void;
 }
 
-function ExecutionEditorForm({ execution, datasets, versions }: FormProps) {
+function ExecutionEditorForm({ execution, datasets, versions, onFormRef }: FormProps) {
   const { user } = useKeycloak();
   const [executionId, setExecutionId] = useState(execution?.id);
+  const [executionName, setExecutionName] = useState('');
   const [datasetId, setDatasetId] = useState(execution?.dataset_id);
   const [versionId, setVersionId] = useState(
     execution?.version_id ??
@@ -118,6 +144,15 @@ function ExecutionEditorForm({ execution, datasets, versions }: FormProps) {
   const [sampleDocTypes, setSampleDocTypes] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [dragOverSide, setDragOverSide] = useState<'left' | 'right' | null>(null);
+
+  // Expose getName/getRadicados to the parent so it can create the folder on disk
+  useEffect(() => {
+    onFormRef({
+      getName: () => executionName.trim(),
+      getRadicados: () => selected.map((r) => r.full_id),
+    });
+    return () => onFormRef(null);
+  }, [executionName, selected, onFormRef]);
 
   const { radicados, loading: radicadosLoading } = useDatasetRadicados(datasetId);
 
@@ -310,6 +345,15 @@ function ExecutionEditorForm({ execution, datasets, versions }: FormProps) {
           {error}
         </div>
       )}
+
+      <div>
+        <label className="mb-1 block text-sm font-medium">Nombre de ejecución</label>
+        <Input
+          placeholder="ej: alpha0081-opus-236"
+          value={executionName}
+          onChange={(e) => setExecutionName(e.target.value)}
+        />
+      </div>
 
       <div>
         <label className="mb-1 block text-sm font-medium">Versión</label>
