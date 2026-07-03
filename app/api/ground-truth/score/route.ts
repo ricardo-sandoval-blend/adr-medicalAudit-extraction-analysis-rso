@@ -2,23 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/db/postgres';
 import { Execution, GroundTruthScoreField, GroundTruthScoreResponse } from '@/lib/types';
 import { readGroundTruth } from '@/lib/ground-truth';
-import { ExecutionDocumentLookup, readExecutionDocument } from '@/lib/extraction';
+import { ExecutionDocumentLookup, readExecutionDocument, listExecutionNames } from '@/lib/extraction';
 
 function normalize(value: unknown): string {
   if (value === null || value === undefined) return '';
   return String(value).trim().toLowerCase();
 }
 
-// GET /api/ground-truth/score?dataset_id=&radicado=&execution_id=
+// GET /api/ground-truth/score?dataset_id=&radicado=&execution_id=&execution=
 // Measures one execution's extracted values against the ground truth fixed
 // for a radicado, field by field — the "desempate" that lets future
 // executions be measured against a past review decision.
+//
+// The optional `execution` query param specifies the on-disk execution folder
+// (e.g. "alpha0079-opus-236"). If omitted, all execution folders are searched.
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const datasetId = searchParams.get('dataset_id');
     const radicado = searchParams.get('radicado');
     const executionId = searchParams.get('execution_id');
+    const executionNameParam = searchParams.get('execution');
 
     if (!datasetId || !radicado || !executionId) {
       return NextResponse.json(
@@ -34,7 +38,11 @@ export async function GET(request: NextRequest) {
     if (executionResult.rows.length === 0) {
       return NextResponse.json({ error: 'Execution not found' }, { status: 404 });
     }
-    const execution = executionResult.rows[0];
+
+    // Determine which execution folders to search
+    const execNames = executionNameParam
+      ? [executionNameParam]
+      : await listExecutionNames();
 
     const groundTruth = await readGroundTruth(datasetId, radicado);
     const fields: GroundTruthScoreField[] = [];
@@ -45,10 +53,16 @@ export async function GET(request: NextRequest) {
 
     for (const [documentType, doc] of Object.entries(groundTruth.documents)) {
       if (!extractionByType.has(documentType)) {
-        extractionByType.set(
-          documentType,
-          await readExecutionDocument(new Date(execution.created_at), radicado, documentType)
-        );
+        // Search across execution folders for this radicado + type
+        let found: ExecutionDocumentLookup = { found: false, executionFolder: '', fields: {} };
+        for (const name of execNames) {
+          const lookup = await readExecutionDocument(name, radicado, documentType);
+          if (lookup.found) {
+            found = lookup;
+            break;
+          }
+        }
+        extractionByType.set(documentType, found);
       }
       const extraction = extractionByType.get(documentType)!;
 

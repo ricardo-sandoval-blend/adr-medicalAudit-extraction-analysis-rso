@@ -42,68 +42,76 @@ export function flattenExtraction(node: unknown, prefix = ''): ExtractionFieldMa
   return result;
 }
 
-// A dataset radicado folder is named '{numero}_{nit}_{suffix}', but an
-// execution's on-disk radicado folder drops the suffix ('{numero}_{nit}').
-// Extracts the shared prefix so a dataset radicado's full_id can be matched
-// against an execution's output folder.
+// A radicado folder is named '{seq}_{nit}_{suffix}' (3 segments).
+// Returns the full folder name as-is since it's used directly as the path.
 export function radicadoNumeroNit(radicadoFullId: string): string | null {
   const parts = radicadoFullId.split('_');
   if (parts.length < 2) return null;
-  return `${parts[0]}_${parts[1]}`;
-}
-
-function formatDateFolder(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}${m}${d}`;
+  // Return the full id — folder names in disk use 3 segments (seq_nit_suffix)
+  return radicadoFullId;
 }
 
 export interface ExecutionDocumentLookup {
   found: boolean;
-  dateFolder: string;
+  executionFolder: string;
   filename?: string;
   fields: ExtractionFieldMap;
 }
 
-// Locates and reads the extraction output for one document of one radicado,
-// for the execution that ran on `executionDate` (an execution's created_at).
-// Execution outputs are written to
-// executions/<YYYYMMDD>/<numero>_<nit>/<seq>_<TYPE>_<nit>_<suffix>.json —
-// keyed by calendar date rather than execution id, so two executions started
-// the same day for the same radicado are not distinguishable on disk. When
-// nothing is found (including because real extraction output doesn't exist
-// yet for mocked executions), `found` is false rather than throwing.
+// Locates and reads the extraction output for one document of one radicado.
+// The on-disk layout is:
+//   executions/<execution-name>/<seq>_<nit>_<suffix>/<docseq>_<TYPE>_<nit>_<suffix>.json
+//
+// `executionName` identifies the execution folder (e.g. "alpha0079-opus-236").
+// `radicadoFullId` is the full 3-segment folder name (e.g. "000930_800149384_70563119").
+// `documentType` is the type code (e.g. "ADM", "PDX", "HAU").
+//
+// When nothing is found, `found` is false rather than throwing.
 export async function readExecutionDocument(
-  executionDate: Date,
+  executionName: string,
   radicadoFullId: string,
   documentType: string
 ): Promise<ExecutionDocumentLookup> {
-  const dateFolder = formatDateFolder(executionDate);
-  const numeroNit = radicadoNumeroNit(radicadoFullId);
-  if (!numeroNit) return { found: false, dateFolder, fields: {} };
-
-  const radicadoPath = join(EXECUTIONS_PATH, dateFolder, numeroNit);
+  const radicadoPath = join(EXECUTIONS_PATH, executionName, radicadoFullId);
 
   let filenames: string[];
   try {
     filenames = await readdir(radicadoPath);
   } catch {
-    return { found: false, dateFolder, fields: {} };
+    return { found: false, executionFolder: executionName, fields: {} };
   }
 
-  // Filenames look like '000_ADM_807000041_CO04953628.json' — the document
+  // Filenames look like '000_ADM_800149384_70563119.json' — the document
   // type is always the second underscore-separated segment.
   const filename = filenames.find((name) => {
     const parts = name.replace(/\.json$/i, '').split('_');
     return parts[1] === documentType;
   });
-  if (!filename) return { found: false, dateFolder, fields: {} };
+  if (!filename) return { found: false, executionFolder: executionName, fields: {} };
 
   try {
     const raw = await readFile(join(radicadoPath, filename), 'utf-8');
-    return { found: true, dateFolder, filename, fields: flattenExtraction(JSON.parse(raw)) };
+    return {
+      found: true,
+      executionFolder: executionName,
+      filename,
+      fields: flattenExtraction(JSON.parse(raw)),
+    };
   } catch {
-    return { found: false, dateFolder, filename, fields: {} };
+    return { found: false, executionFolder: executionName, filename, fields: {} };
+  }
+}
+
+// Lists all available execution names from disk (the top-level directories
+// inside the EXECUTIONS_PATH).
+export async function listExecutionNames(): Promise<string[]> {
+  try {
+    const entries = await readdir(EXECUTIONS_PATH, { withFileTypes: true });
+    return entries
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    return [];
   }
 }
