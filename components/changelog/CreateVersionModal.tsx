@@ -60,6 +60,7 @@ export function CreateVersionModal({
   const [error, setError] = useState<string | null>(null);
   const [lastVersion, setLastVersion] = useState<string | null>(null);
   const [suggestedVersion, setSuggestedVersion] = useState<string | null>(null);
+  const [showBulletsForm, setShowBulletsForm] = useState(false);
 
   const version = `v${major}.${minor}.${patch}`;
 
@@ -163,6 +164,7 @@ export function CreateVersionModal({
       setCurrentDescription('');
       setCurrentClickupUrl(CLICKUP_BASE_URL);
       setCurrentTitle('');
+      setShowBulletsForm(false);
       setOpen(false);
       onVersionCreated?.();
     } catch (err) {
@@ -175,7 +177,7 @@ export function CreateVersionModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setShowBulletsForm(false); }}>
       <DialogTrigger asChild>
         <Button
           disabled={hasOpenVersion}
@@ -407,6 +409,8 @@ export function CreateVersionModal({
                   </div>
                 ))}
               </div>
+            )}
+          </>
             )}
           </div>
 

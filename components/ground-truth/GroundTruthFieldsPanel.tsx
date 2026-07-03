@@ -245,6 +245,7 @@ export function GroundTruthFieldsPanel({
         editing={editing}
         entry={editing && !editing.isNew ? documents[editing.documentType]?.[editing.fieldPath] : undefined}
         saving={editing !== null && busyKey === `${editing.documentType}.${editing.fieldPath}`}
+        existingFieldPaths={Object.values(documents).flatMap((doc) => Object.keys(doc))}
         onCancel={() => setEditing(null)}
         onSave={handleSave}
       />
@@ -256,6 +257,7 @@ interface GroundTruthFieldEditorProps {
   editing: EditingField | null;
   entry: GroundTruthEntry | undefined;
   saving: boolean;
+  existingFieldPaths: string[];
   onCancel: () => void;
   onSave: (
     documentType: string,
@@ -274,6 +276,7 @@ function GroundTruthFieldEditor({
   editing,
   entry,
   saving,
+  existingFieldPaths,
   onCancel,
   onSave,
 }: GroundTruthFieldEditorProps) {
@@ -330,13 +333,38 @@ function GroundTruthFieldEditor({
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">Campo</label>
-            <Input
-              value={fieldPath}
-              onChange={(e) => setFieldPath(e.target.value)}
-              placeholder="paz_y_salvo_transporte.entidad_prestadora.nit"
-              disabled={!editing.isNew}
-              className="font-mono text-xs"
-            />
+            <div className="relative">
+              {(() => {
+                const term = fieldPath.toLowerCase();
+                const suggestion = term && editing?.isNew
+                  ? existingFieldPaths.find((p) => p.toLowerCase().startsWith(term) && p.toLowerCase() !== term)
+                  : undefined;
+                return (
+                  <>
+                    {suggestion && (
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono text-muted-foreground/40 select-none">
+                        {fieldPath}{suggestion.slice(fieldPath.length)}
+                        <span className="ml-2 text-muted-foreground/30">Tab</span>
+                      </span>
+                    )}
+                    <input
+                      type="text"
+                      value={fieldPath}
+                      onChange={(e) => setFieldPath(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Tab' && suggestion) {
+                          e.preventDefault();
+                          setFieldPath(suggestion);
+                        }
+                      }}
+                      placeholder="paz_y_salvo_transporte.entidad_prestadora.nit"
+                      disabled={!editing?.isNew}
+                      className="w-full rounded-md border border-input bg-background py-2 px-3 text-xs font-mono outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                    />
+                  </>
+                );
+              })()}
+            </div>
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">Valor correcto</label>
@@ -344,11 +372,38 @@ function GroundTruthFieldEditor({
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">Estado</label>
-            <Input
-              value={estado}
-              onChange={(e) => setEstado(e.target.value)}
-              placeholder="ENCONTRADO / NO_ENCONTRADO"
-            />
+            <div className="relative">
+              {(() => {
+                const estados = ['ENCONTRADO', 'NO_ENCONTRADO'];
+                const term = estado.toUpperCase();
+                const suggestion = term
+                  ? estados.find((e) => e.startsWith(term) && e !== term)
+                  : undefined;
+                return (
+                  <>
+                    {suggestion && (
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground/40 select-none">
+                        {estado}{suggestion.slice(estado.length)}
+                        <span className="ml-2 text-xs text-muted-foreground/30">Tab</span>
+                      </span>
+                    )}
+                    <input
+                      type="text"
+                      value={estado}
+                      onChange={(e) => setEstado(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Tab' && suggestion) {
+                          e.preventDefault();
+                          setEstado(suggestion);
+                        }
+                      }}
+                      placeholder="ENCONTRADO / NO_ENCONTRADO"
+                      className="w-full rounded-md border border-input bg-background py-2 px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </>
+                );
+              })()}
+            </div>
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">Observación</label>

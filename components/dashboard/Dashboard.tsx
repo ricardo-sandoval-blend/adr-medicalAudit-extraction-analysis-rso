@@ -176,7 +176,7 @@ export function Dashboard() {
             {stats.executions.map((exec) => (
               <div
                 key={exec.execution_name}
-                className="rounded-lg border border-border bg-card p-6"
+                className="rounded-lg border border-border bg-card p-6 hover:bg-muted/50 transition-colors"
               >
                 <h3 className="font-semibold">{exec.execution_name}</h3>
                 <div className="mt-3 grid grid-cols-3 gap-4 text-sm">

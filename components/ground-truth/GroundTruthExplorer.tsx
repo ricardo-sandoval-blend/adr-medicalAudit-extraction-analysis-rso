@@ -149,12 +149,39 @@ export function GroundTruthExplorer() {
 
             <div>
               <label className="mb-1 block text-sm font-medium">Buscar radicado</label>
-              <Input
-                placeholder="Número o NIT..."
-                value={radicadoSearch}
-                onChange={(e) => setRadicadoSearch(e.target.value)}
-                disabled={!datasetId}
-              />
+              <div className="relative">
+                {(() => {
+                  const term = radicadoSearch.toLowerCase();
+                  const allValues = [...new Set(radicados.flatMap((r) => [r.numero, r.nit, r.full_id]))];
+                  const suggestion = term
+                    ? allValues.find((val) => val.toLowerCase().startsWith(term) && val.toLowerCase() !== term)
+                    : undefined;
+                  return (
+                    <>
+                      {suggestion && (
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground/40 select-none">
+                          {radicadoSearch}{suggestion.slice(radicadoSearch.length)}
+                          <span className="ml-2 text-xs text-muted-foreground/30">Tab</span>
+                        </span>
+                      )}
+                      <input
+                        type="text"
+                        placeholder="Número o NIT..."
+                        value={radicadoSearch}
+                        onChange={(e) => setRadicadoSearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Tab' && suggestion) {
+                            e.preventDefault();
+                            setRadicadoSearch(suggestion);
+                          }
+                        }}
+                        disabled={!datasetId}
+                        className="w-full rounded-md border border-input bg-background py-2 px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                      />
+                    </>
+                  );
+                })()}
+              </div>
             </div>
           </div>
 

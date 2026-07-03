@@ -203,12 +203,12 @@ export function Executor() {
             : exec.radicados;
 
           return (
-            <Card key={exec.execution_name} className="overflow-hidden">
+            <Card key={exec.execution_name} className="overflow-hidden hover:bg-muted/50 transition-colors cursor-pointer">
               {/* Card header - clickable to expand/collapse */}
               <button
                 type="button"
                 onClick={() => toggleCard(exec.execution_name)}
-                className="flex w-full items-center justify-between px-6 py-4 text-left hover:bg-muted/50 transition-colors"
+                className="flex w-full items-center justify-between px-6 py-4 text-left"
               >
                 <div className="flex items-center gap-3">
                   {isExpanded ? (
@@ -243,15 +243,39 @@ export function Executor() {
                   {/* Search within this execution */}
                   <div className="relative max-w-md mb-4">
                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                      type="text"
-                      placeholder="Buscar por NIT, radicado o sufijo..."
-                      value={search}
-                      onChange={(e) =>
-                        setSearch(exec.execution_name, e.target.value)
-                      }
-                      className="w-full rounded-md border border-input bg-background py-2 pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-ring"
-                    />
+                    {/* Ghost suggestion text behind the input */}
+                    {(() => {
+                      const term = search.toLowerCase();
+                      const suggestion = term
+                        ? [...new Set(exec.radicados.flatMap((r) => [r.nit, r.suffix, r.seq]))]
+                            .find((val) => val.toLowerCase().startsWith(term) && val.toLowerCase() !== term)
+                        : undefined;
+                      return (
+                        <>
+                          {suggestion && (
+                            <span className="pointer-events-none absolute left-10 top-1/2 -translate-y-1/2 text-sm text-muted-foreground/40 font-normal select-none">
+                              {search}{suggestion.slice(search.length)}
+                              <span className="ml-2 text-xs text-muted-foreground/30">Tab</span>
+                            </span>
+                          )}
+                          <input
+                            type="text"
+                            placeholder="Buscar por NIT, radicado o sufijo..."
+                            value={search}
+                            onChange={(e) =>
+                              setSearch(exec.execution_name, e.target.value)
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Tab' && suggestion) {
+                                e.preventDefault();
+                                setSearch(exec.execution_name, suggestion);
+                              }
+                            }}
+                            className="w-full rounded-md border border-input bg-background py-2 pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-ring"
+                          />
+                        </>
+                      );
+                    })()}
                   </div>
 
                   <div className="text-sm text-muted-foreground mb-3">
