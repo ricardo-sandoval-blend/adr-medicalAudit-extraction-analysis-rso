@@ -5,15 +5,15 @@ import { join } from 'path';
 const DATASETS_PATH =
   process.env.DATASETS_PATH || join(process.cwd(), 'datasets');
 
-// GET /api/documents/pdf?radicado=000930_800149384_70563119&type=ADM&dataset=<optional>
+// GET /api/documents/pdf?radicado=000930_800149384_70563119&type=ADM
 // Serves the PDF file for a given radicado and document type.
-// Searches across all datasets if dataset is not specified.
+// Searches directly in DATASETS_PATH/<radicado>/TYPE_nit_suffix.pdf
+// Also searches inside dataset subdirectories if the radicado is not at root.
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const radicado = searchParams.get('radicado');
     const type = searchParams.get('type');
-    const dataset = searchParams.get('dataset');
 
     if (!radicado || !type) {
       return NextResponse.json(
@@ -22,40 +22,23 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Search for the PDF in datasets
-    const searchDirs = dataset
-      ? [join(DATASETS_PATH, dataset)]
-      : await getDatasetDirs();
+    // Strategy 1: radicado folder directly under DATASETS_PATH
+    const directPath = join(DATASETS_PATH, radicado);
+    const found = await findPdfInDir(directPath, type);
+    if (found) return found;
 
-    for (const datasetDir of searchDirs) {
-      const radicadoPath = join(datasetDir, radicado);
-      let files: string[];
-      try {
-        files = await readdir(radicadoPath);
-      } catch {
-        continue;
+    // Strategy 2: radicado folder inside a dataset subdirectory
+    // (datasets/<dataset-id>/<radicado>/)
+    try {
+      const datasetDirs = await readdir(DATASETS_PATH, { withFileTypes: true });
+      for (const entry of datasetDirs) {
+        if (!entry.isDirectory()) continue;
+        const nestedPath = join(DATASETS_PATH, entry.name, radicado);
+        const nestedFound = await findPdfInDir(nestedPath, type);
+        if (nestedFound) return nestedFound;
       }
-
-      // Find PDF matching the type (e.g. ADM_800149384_70563119.pdf)
-      const pdfFile = files.find((f) => {
-        if (!f.toLowerCase().endsWith('.pdf')) return false;
-        const prefix = f.split('_')[0];
-        return prefix === type;
-      });
-
-      if (pdfFile) {
-        try {
-          const pdfBuffer = await readFile(join(radicadoPath, pdfFile));
-          return new NextResponse(pdfBuffer, {
-            headers: {
-              'Content-Type': 'application/pdf',
-              'Content-Disposition': `inline; filename="${pdfFile}"`,
-            },
-          });
-        } catch {
-          continue;
-        }
-      }
+    } catch {
+      // Ignore errors reading directories
     }
 
     return NextResponse.json(
@@ -71,13 +54,35 @@ export async function GET(request: NextRequest) {
   }
 }
 
-async function getDatasetDirs(): Promise<string[]> {
+async function findPdfInDir(
+  dirPath: string,
+  type: string
+): Promise<NextResponse | null> {
+  let files: string[];
   try {
-    const entries = await readdir(DATASETS_PATH, { withFileTypes: true });
-    return entries
-      .filter((e) => e.isDirectory())
-      .map((e) => join(DATASETS_PATH, e.name));
+    files = await readdir(dirPath);
   } catch {
-    return [];
+    return null;
+  }
+
+  // PDF naming: TYPE_nit_suffix.pdf — type is the first segment
+  const pdfFile = files.find((f) => {
+    if (!f.toLowerCase().endsWith('.pdf')) return false;
+    const prefix = f.split('_')[0];
+    return prefix === type;
+  });
+
+  if (!pdfFile) return null;
+
+  try {
+    const pdfBuffer = await readFile(join(dirPath, pdfFile));
+    return new NextResponse(pdfBuffer, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `inline; filename="${pdfFile}"`,
+      },
+    });
+  } catch {
+    return null;
   }
 }

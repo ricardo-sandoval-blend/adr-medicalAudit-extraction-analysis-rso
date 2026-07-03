@@ -33,10 +33,23 @@ export function DocumentViewerModal({
   useEffect(() => {
     if (!open) return;
 
-    // Build PDF URL
+    // Build PDF URL and verify it exists
     const pdfParams = new URLSearchParams({ radicado, type: documentType });
-    setPdfUrl(`/api/documents/pdf?${pdfParams.toString()}`);
+    const url = `/api/documents/pdf?${pdfParams.toString()}`;
     setPdfError(false);
+
+    // Check if PDF exists before showing iframe
+    fetch(url, { method: 'HEAD' }).then((res) => {
+      if (res.ok) {
+        setPdfUrl(url);
+      } else {
+        setPdfUrl(null);
+        setPdfError(true);
+      }
+    }).catch(() => {
+      setPdfUrl(null);
+      setPdfError(true);
+    });
 
     // Fetch JSON
     const fetchJson = async () => {
