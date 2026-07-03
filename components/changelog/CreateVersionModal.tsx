@@ -282,9 +282,20 @@ export function CreateVersionModal({
 
           {/* Bullets: document + descripción + issue */}
           <div>
-            <label className="text-sm font-medium block mb-3">
-              Cambios (se agrupan por documento al visualizarse)
-            </label>
+            {!showBulletsForm ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowBulletsForm(true)}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Agregar cambios
+              </Button>
+            ) : (
+              <>
+                <label className="text-sm font-medium block mb-3">
+                  Cambios (se agrupan por documento al visualizarse)
+                </label>
 
             {/* Add bullet form */}
             <div className="space-y-3 p-4 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 mb-4">

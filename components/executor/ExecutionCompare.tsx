@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { DOCUMENT_TYPES, DOCUMENT_TYPE_LABELS, DocumentType } from '@/lib/config';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -12,6 +13,17 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Loader2 } from 'lucide-react';
+
+// react-diff-viewer-continued uses browser APIs, so it must be loaded client-side only
+const ReactDiffViewer = dynamic(() => import('react-diff-viewer-continued'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center py-8 text-muted-foreground">
+      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+      Cargando diff...
+    </div>
+  ),
+});
 
 interface RadicadoEntry {
   folder: string;
@@ -56,6 +68,63 @@ export function ExecutionCompare() {
   const [jsonA, setJsonA] = useState<Record<string, unknown> | null>(null);
   const [jsonB, setJsonB] = useState<Record<string, unknown> | null>(null);
   const [loadingJson, setLoadingJson] = useState(false);
+  const [fieldFilter, setFieldFilter] = useState('');
+
+  // Recursively extract all dot-separated key paths from a JSON object
+  const extractKeys = (obj: unknown, prefix = ''): string[] => {
+    if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return [];
+    const keys: string[] = [];
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      const path = prefix ? `${prefix}.${key}` : key;
+      keys.push(path);
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        keys.push(...extractKeys(value, path));
+      }
+    }
+    return keys;
+  };
+
+  // All available keys from jsonA and jsonB (for autocomplete and filtering)
+  const allKeys = useMemo(() => {
+    const keysA = jsonA ? extractKeys(jsonA) : [];
+    const keysB = jsonB ? extractKeys(jsonB) : [];
+    return [...new Set([...keysA, ...keysB])].sort();
+  }, [jsonA, jsonB]);
+
+  // Extract a nested value by dot-path
+  const getByPath = (obj: Record<string, unknown>, path: string): unknown => {
+    const parts = path.split('.');
+    let current: unknown = obj;
+    for (const part of parts) {
+      if (typeof current !== 'object' || current === null) return undefined;
+      current = (current as Record<string, unknown>)[part];
+    }
+    return current;
+  };
+
+  // Filter JSON to only show the selected field(s)
+  const filterJson = (obj: Record<string, unknown> | null): unknown => {
+    if (!obj) return null;
+    if (!fieldFilter.trim()) return obj;
+
+    const term = fieldFilter.trim();
+
+    // Exact dot-path match
+    const exactValue = getByPath(obj, term);
+    if (exactValue !== undefined) return { [term]: exactValue };
+
+    // Search all keys (including nested) that contain the term and return
+    // their full paths with values
+    const termLower = term.toLowerCase();
+    const objKeys = extractKeys(obj);
+    const matches: Record<string, unknown> = {};
+    for (const key of objKeys) {
+      if (key.toLowerCase().includes(termLower)) {
+        matches[key] = getByPath(obj, key);
+      }
+    }
+    return Object.keys(matches).length > 0 ? matches : null;
+  };
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -293,6 +362,38 @@ export function ExecutionCompare() {
               </Select>
             </div>
           )}
+
+          {/* Field filter with autocomplete */}
+          {documentType && jsonA && (
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                Filtrar por campo (opcional)
+              </label>
+              <div className="relative">
+                <input
+                  list="field-suggestions"
+                  placeholder="Escribe para buscar un campo... ej: usuario_victima.tipo_documento"
+                  value={fieldFilter}
+                  onChange={(e) => setFieldFilter(e.target.value)}
+                  className="w-full rounded-md border border-input bg-background py-2 px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+                <datalist id="field-suggestions">
+                  {allKeys.map((key) => (
+                    <option key={key} value={key} />
+                  ))}
+                </datalist>
+                {fieldFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setFieldFilter('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Limpiar
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -303,59 +404,35 @@ export function ExecutionCompare() {
           Cargando documentos...
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {/* Execution A JSON */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">
-                {executionA}
-                <span className="ml-2 text-sm font-normal text-muted-foreground">
-                  {selectedRadicado} · {documentType}
-                </span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {jsonA ? (
-                <pre className="max-h-[600px] overflow-auto rounded-md bg-muted p-4 text-xs font-mono whitespace-pre-wrap break-words">
-                  {JSON.stringify(jsonA, null, 2)}
-                </pre>
-              ) : (
-                <div className="py-8 text-center text-sm text-muted-foreground">
-                  Documento no encontrado en esta ejecución
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Execution B JSON */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">
-                {executionB || '(sin seleccionar)'}
-                <span className="ml-2 text-sm font-normal text-muted-foreground">
-                  {selectedRadicado} · {documentType}
-                </span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {executionB ? (
-                jsonB ? (
-                  <pre className="max-h-[600px] overflow-auto rounded-md bg-muted p-4 text-xs font-mono whitespace-pre-wrap break-words">
-                    {JSON.stringify(jsonB, null, 2)}
-                  </pre>
-                ) : (
-                  <div className="py-8 text-center text-sm text-muted-foreground">
-                    Documento no encontrado en esta ejecución
-                  </div>
-                )
-              ) : (
-                <div className="py-8 text-center text-sm text-muted-foreground">
-                  Selecciona una ejecución B para comparar
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-4">
+              <span>{executionA}</span>
+              <span className="text-muted-foreground font-normal">vs</span>
+              <span>{executionB || '(sin seleccionar)'}</span>
+              <span className="ml-auto text-sm font-normal text-muted-foreground">
+                {selectedRadicado} · {documentType}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0 overflow-auto">
+            {!jsonA && !jsonB ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                Documento no encontrado en ninguna ejecución
+              </div>
+            ) : (
+              <ReactDiffViewer
+                oldValue={JSON.stringify(filterJson(jsonA) ?? {}, null, 2)}
+                newValue={JSON.stringify(filterJson(jsonB) ?? {}, null, 2)}
+                splitView={true}
+                leftTitle={executionA}
+                rightTitle={executionB || '(sin seleccionar)'}
+                useDarkTheme={false}
+                showDiffOnly={false}
+              />
+            )}
+          </CardContent>
+        </Card>
       ))}
     </div>
   );

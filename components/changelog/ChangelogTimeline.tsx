@@ -448,6 +448,7 @@ function VersionCardEntry({
   const [formError, setFormError] = useState<string | null>(null);
 
   const isOpen = entry.status === 'open';
+  const hasOpenIncidents = entry.incidents.some((i) => i.status === 'open');
   const groupedBullets = groupByDocumentType(entry.incidents);
 
   const handleAddIssue = async () => {
@@ -553,15 +554,22 @@ function VersionCardEntry({
           </div>
 
           {isOpen && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleClose}
-              disabled={closing}
-            >
-              <Lock className="h-4 w-4 mr-1" />
-              {closing ? 'Publicando...' : 'Publicar versión'}
-            </Button>
+            <div className="flex flex-col items-end gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleClose}
+                disabled={closing || hasOpenIncidents}
+              >
+                <Lock className="h-4 w-4 mr-1" />
+                {closing ? 'Publicando...' : 'Publicar versión'}
+              </Button>
+              {hasOpenIncidents && (
+                <p className="text-xs text-muted-foreground">
+                  Cierra todos los cambios en progreso antes de publicar
+                </p>
+              )}
+            </div>
           )}
         </div>
       </div>
