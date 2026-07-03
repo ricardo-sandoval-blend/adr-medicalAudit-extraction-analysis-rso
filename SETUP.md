@@ -43,7 +43,7 @@ startup, before starting the app — there is no separate `db-init` service anym
 
 ```bash
 # Option A: Docker Compose directly
-docker compose --env-file .env.local up --build
+l
 
 # Option B: Quick start with shell script
 bash scripts/docker-init-db.sh
